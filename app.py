@@ -50,10 +50,8 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
         draw = ImageDraw.Draw(fundo)
         
-        # --- MUDANÇA FINAL AQUI: NOVOS TAMANHOS DE FONTE ---
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50) # Ajustado para 50
-        fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)    # Mantido em 32
-        fonte_site = ImageFont.truetype("Anton-Regular.ttf", 28)     # Mantido em 28
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 60)
+        fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)
 
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
@@ -63,12 +61,15 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         logo.thumbnail((180, 180))
         fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
         
-        linhas_texto = textwrap.wrap(titulo_post, width=35) # Ajustado para a nova fonte
+        linhas_texto = textwrap.wrap(titulo_post, width=35)
         texto_junto = "\n".join(linhas_texto)
-        draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
-        draw.text((IMG_WIDTH / 2, 950), "LEIA MAIS", font=fonte_cta, fill="#FF0000", anchor="ms", align="center")
-        draw.text((IMG_WIDTH / 2, 1000), "jornalvozdolitoral.com", font=fonte_site, fill=(255,255,255,255), anchor="ms", align="center")
+        # --- AJUSTE AQUI: Título movido para cima ---
+        draw.text((IMG_WIDTH / 2, 680), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
+        
+        # --- AJUSTE AQUI: Novo formato do rodapé ---
+        texto_rodape = "LEIA MAIS: jornalvozdolitoral.com"
+        draw.text((IMG_WIDTH / 2, 980), texto_rodape, font=fonte_cta, fill=(255,255,255,255), anchor="ms", align="center")
         
         buffer_saida = io.BytesIO()
         fundo.save(buffer_saida, format='PNG')
@@ -187,5 +188,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v5.2 Final. Design Final Ajustado.")
+    print("✅ Automação v5.4 Final. Layout de rodapé ajustado.")
     app.run(host='0.0.0.0', port=5001, debug=True)
