@@ -10,7 +10,6 @@ import numpy as np
 from flask import Flask, request, jsonify
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-import google.generativeai as genai
 from PIL import Image, ImageDraw, ImageFont
 import imageio
 
@@ -20,39 +19,42 @@ import imageio
 load_dotenv()
 app = Flask(__name__)
 
-try:
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-except Exception as e:
-    print(f"❌ ERRO GRAVE: Não foi possível configurar a API do Gemini. Verifique sua chave no arquivo .env. Erro: {e}")
+# Pega o token da Hugging Face do ambiente
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+API_URL_SUMMARIZATION = "https://api-inference.huggingface.co/models/Falconsai/text_summarization"
+HEADERS = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
 
 REELS_WIDTH, REELS_HEIGHT, VIDEO_DURATION, FPS = 1080, 1920, 8, 24
 
 # ==============================================================================
-# BLOCO 3: FUNÇÕES AUXILIARES (NENHUMA MUDANÇA AQUI)
+# BLOCO 3: FUNÇÕES AUXILIARES
 # ==============================================================================
 def gerar_conteudo_com_ia(texto_noticia):
-    print("🤖 Conectando com a IA para gerar conteúdo...")
+    print("🤖 Conectando com a IA da Hugging Face para gerar resumo...")
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        prompt = f"""
-        Aja como um editor de social media para um portal de notícias brasileiro.
-        Baseado na notícia abaixo, gere o seguinte conteúdo para um Reels do Instagram no formato JSON:
-        1.  "titulo_video": Um título muito curto e impactante para aparecer no vídeo (máximo 10 palavras).
-        2.  "legenda": Uma legenda para o post, resumindo a notícia em 2-3 frases e terminando com "Leia a matéria completa no link da bio.".
-        3.  "hashtags": Uma string única contendo de 5 a 7 hashtags relevantes separadas por espaço (ex: "#noticia #brasil #politica").
-        Notícia: {texto_noticia[:4000]}
-        """
-        response = model.generate_content(prompt)
-        json_response_text = response.text.replace("```json", "").replace("```", "").strip()
-        conteudo_gerado = json.loads(json_response_text)
-        print("✅ Conteúdo gerado pela IA com sucesso!")
-        return conteudo_gerado
+        # Prepara os dados para enviar para a API
+        payload = {
+            "inputs": texto_noticia[:1024], # Usa os primeiros 1024 caracteres
+            "parameters": {"min_length": 20, "max_length": 50}
+        }
+        # Faz a chamada para a API
+        response = requests.post(API_URL_SUMMARIZATION, headers=HEADERS, json=payload)
+        response.raise_for_status() # Garante que não houve erro de API
+        
+        # Pega o resumo gerado
+        resultado = response.json()
+        resumo = resultado[0]['summary_text']
+        
+        print("✅ Resumo gerado pela IA com sucesso!")
+        return {"legenda": resumo}
+        
     except Exception as e:
-        print(f"❌ Erro na IA: {e}")
+        print(f"❌ Erro na IA da Hugging Face: {e}")
         return None
 
 def criar_video_com_pillow(url_imagem, titulo_video, nome_arquivo_saida="reels_gerado.mp4"):
-    print(f"🎬 Começando a criação do vídeo com o novo método (Pillow + Imageio)...")
+    # ... (Esta função continua exatamente a mesma) ...
+    print(f"🎬 Começando a criação do vídeo...")
     try:
         response_img = requests.get(url_imagem, stream=True)
         response_img.raise_for_status()
@@ -69,7 +71,6 @@ def criar_video_com_pillow(url_imagem, titulo_video, nome_arquivo_saida="reels_g
         try:
             fonte = ImageFont.truetype("arialbd.ttf", 90)
         except IOError:
-            print("⚠️ Fonte Arial Bold não encontrada, usando fonte padrão.")
             fonte = ImageFont.load_default()
         
         linhas_texto = textwrap.wrap(titulo_video.upper(), width=20)
@@ -83,17 +84,18 @@ def criar_video_com_pillow(url_imagem, titulo_video, nome_arquivo_saida="reels_g
         
         imageio.mimsave(nome_arquivo_saida, frames, fps=FPS, codec='libx264')
         
-        print(f"✅ Vídeo '{nome_arquivo_saida}' salvo com sucesso com o novo método!")
+        print(f"✅ Vídeo '{nome_arquivo_saida}' salvo com sucesso!")
         return nome_arquivo_saida
     except Exception as e:
-        print(f"❌ Erro ao criar vídeo com Pillow/Imageio: {e}")
+        print(f"❌ Erro ao criar vídeo: {e}")
         return None
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - COM AS CORREÇÕES
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
+    # ... (Esta função continua quase a mesma, só muda como usa o resultado da IA) ...
     print("\n\n🔔 Webhook recebido do WordPress!")
     dados_brutos = request.json
 
@@ -103,29 +105,21 @@ def webhook_receiver():
         dados_wp = dados_brutos
     
     try:
-        # --- CORREÇÃO 1: PEGANDO O LINK DO LUGAR CERTO ---
         url_noticia = dados_wp.get('post_permalink')
         titulo_noticia = dados_wp.get('post', {}).get('post_title')
-        
-        # --- CORREÇÃO 2: EXTRAINDO A IMAGEM DE DENTRO DO CONTEÚDO ---
         html_content = dados_wp.get('post', {}).get('post_content')
-        if not html_content:
-            raise ValueError("Conteúdo do post não encontrado no webhook.")
+        if not html_content: raise ValueError("Conteúdo do post não encontrado.")
         
         soup_img = BeautifulSoup(html_content, 'html.parser')
         primeira_imagem_tag = soup_img.find('img')
-        
-        if not primeira_imagem_tag:
-             raise ValueError("Nenhuma tag <img> encontrada no conteúdo do post.")
+        if not primeira_imagem_tag: raise ValueError("Nenhuma tag <img> encontrada.")
         
         url_imagem_destaque = primeira_imagem_tag.get('src')
-        
         if not all([url_noticia, titulo_noticia, url_imagem_destaque]):
-            raise ValueError(f"Dados essenciais faltando. URL: {url_noticia}, Titulo: {titulo_noticia}, Imagem: {url_imagem_destaque}")
-
+            raise ValueError("Dados essenciais faltando.")
     except Exception as e:
         print(f"❌ Erro ao processar dados do webhook: {e}")
-        return jsonify({"status": "erro", "mensagem": "Payload do webhook com formato inesperado ou dados faltando."}), 400
+        return jsonify({"status": "erro", "mensagem": "Payload do webhook com formato inválido."}), 400
 
     print(f"📰 Notícia recebida: {titulo_noticia}")
     print(f"🖼️ Imagem encontrada: {url_imagem_destaque}")
@@ -134,7 +128,7 @@ def webhook_receiver():
         print(f"💻 Lendo o conteúdo de: {url_noticia}")
         response_page = requests.get(url_noticia)
         soup = BeautifulSoup(response_page.content, 'html.parser')
-        corpo_artigo = soup.find('div', class_='entry-content') 
+        corpo_artigo = soup.find('div', class_='entry-content') or soup.find('article') or soup.find('main')
         texto_noticia = corpo_artigo.get_text(separator='\n', strip=True)
         print("✅ Texto da notícia extraído com sucesso.")
     except Exception as e:
@@ -145,19 +139,21 @@ def webhook_receiver():
     if not conteudo_ia:
         return jsonify({"status": "erro", "mensagem": "Falha na IA."}), 500
     
-    caminho_video_final = criar_video_com_pillow(url_imagem_destaque, conteudo_ia['titulo_video'])
+    # Usa o título original da matéria para o vídeo
+    caminho_video_final = criar_video_com_pillow(url_imagem_destaque, titulo_noticia)
     if not caminho_video_final:
         return jsonify({"status": "erro", "mensagem": "Falha na criação do vídeo."}), 500
 
-    legenda_final = f"{conteudo_ia['legenda']}\n.\n.\n.\n{conteudo_ia['hashtags']}"
+    # Usa o resumo gerado pela IA como legenda
+    legenda_final = f"{conteudo_ia['legenda']}\n.\n.\n.\n#noticias #brasil"
     print("📤 Simulando publicação do Reel...")
     print(f"   -> Legenda do post: {legenda_final}")
-    print("✅ Automação concluída com sucesso para esta notícia!")
+    print("✅ Automação concluída com sucesso!")
     return jsonify({"status": "sucesso"}), 200
 
 # ==============================================================================
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação iniciada!")
+    print("✅ Automação iniciada com IA da Hugging Face!")
     app.run(host='0.0.0.0', port=5001, debug=True)
