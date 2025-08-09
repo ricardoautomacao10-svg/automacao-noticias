@@ -42,15 +42,19 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
     try:
         response_img = requests.get(url_imagem, stream=True); response_img.raise_for_status()
         imagem_noticia = Image.open(io.BytesIO(response_img.content)).convert("RGBA")
+        
+        # --- MUDANÇA AQUI: NOVO LOGO ---
         response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
         logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
         
         cor_fundo = "#051d40"
         fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
         draw = ImageDraw.Draw(fundo)
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 90)
-        fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 60)
-        fonte_site = ImageFont.truetype("Anton-Regular.ttf", 35)
+        
+        # --- MUDANÇA AQUI: NOVOS TAMANHOS DE FONTE ---
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 40) # Ajustado para 40
+        fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)    # Ajustado para 32
+        fonte_site = ImageFont.truetype("Anton-Regular.ttf", 28)     # Ajustado para 28
 
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
@@ -60,9 +64,9 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         logo.thumbnail((180, 180))
         fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
         
-        linhas_texto = textwrap.wrap(titulo_post, width=22)
+        linhas_texto = textwrap.wrap(titulo_post, width=50) # Aumentei a largura para caber mais texto por linha com a fonte menor
         texto_junto = "\n".join(linhas_texto)
-        draw.text((IMG_WIDTH / 2, 650), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
+        draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
         draw.text((IMG_WIDTH / 2, 950), "LEIA MAIS", font=fonte_cta, fill="#FF0000", anchor="ms", align="center")
         draw.text((IMG_WIDTH / 2, 1000), "jornalvozdolitoral.com", font=fonte_site, fill=(255,255,255,255), anchor="ms", align="center")
@@ -139,10 +143,7 @@ def webhook_receiver():
         post_info = dados_wp.get('post', {})
         titulo_noticia = post_info.get('post_title')
         html_content = post_info.get('post_content')
-        
-        # --- MUDANÇA AQUI: Pegando o RESUMO (Excerto) do post ---
         resumo_noticia = post_info.get('post_excerpt')
-        # Se o resumo estiver vazio, usa os primeiros 150 caracteres do conteúdo como alternativa
         if not resumo_noticia:
             texto_limpo = BeautifulSoup(html_content, 'html.parser').get_text(strip=True)
             resumo_noticia = texto_limpo[:150] + "..."
@@ -154,7 +155,8 @@ def webhook_receiver():
         if not primeira_imagem_tag: raise ValueError("Nenhuma tag <img> encontrada.")
         
         url_imagem_destaque = primeira_imagem_tag.get('src')
-        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/Redondo.png"
+        # --- MUDANÇA AQUI: NOVO LOGO ---
+        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
         
         if not all([titulo_noticia, url_imagem_destaque]):
             raise ValueError("Dados essenciais faltando.")
@@ -172,7 +174,6 @@ def webhook_receiver():
     link_wp = upload_para_wordpress(imagem_gerada_bytes, nome_do_arquivo)
     if not link_wp: return jsonify({"status": "erro", "mensagem": "Falha no upload para o WordPress."}), 500
 
-    # --- MUDANÇA AQUI: Montando a legenda como você sugeriu ---
     legenda_final = f"{titulo_noticia}\n\n{resumo_noticia}\n\nLeia a matéria completa em nosso site. Link na bio!\n\n#noticias #litoralnorte #brasil #jornalismo"
     
     sucesso_ig = publicar_no_instagram(link_wp, legenda_final)
@@ -188,5 +189,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v5.0 Final. Design + Legenda Direta.")
+    print("✅ Automação v5.1 Final. Design Ajustado.")
     app.run(host='0.0.0.0', port=5001, debug=True)
