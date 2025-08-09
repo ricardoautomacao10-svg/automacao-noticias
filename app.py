@@ -51,7 +51,7 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         draw = ImageDraw.Draw(fundo)
         
         # --- MUDANÇA FINAL AQUI: NOVOS TAMANHOS DE FONTE ---
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 60) # Ajustado para 60
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50) # Ajustado para 50
         fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)    # Mantido em 32
         fonte_site = ImageFont.truetype("Anton-Regular.ttf", 28)     # Mantido em 28
 
