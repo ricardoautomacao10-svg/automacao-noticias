@@ -43,31 +43,30 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         response_img = requests.get(url_imagem, stream=True); response_img.raise_for_status()
         imagem_noticia = Image.open(io.BytesIO(response_img.content)).convert("RGBA")
         
-        response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
-        logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
-        
         cor_fundo = "#051d40"
         fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
         draw = ImageDraw.Draw(fundo)
         
         fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 60)
         fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)
+        fonte_site = ImageFont.truetype("Anton-Regular.ttf", 28)
 
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
         pos_img_x = (IMG_WIDTH - img_w) // 2
         fundo.paste(imagem_noticia_resized, (pos_img_x, 50))
         
-        logo.thumbnail((180, 180))
-        fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
+        # --- Lógica Bônus: Só adiciona o logo pequeno se a imagem principal NÃO for o logo ---
+        if url_imagem != url_logo:
+            response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
+            logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
+            logo.thumbnail((180, 180))
+            fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
         
         linhas_texto = textwrap.wrap(titulo_post, width=35)
         texto_junto = "\n".join(linhas_texto)
+        draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
-        # --- AJUSTE AQUI: Título movido para cima ---
-        draw.text((IMG_WIDTH / 2, 680), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
-        
-        # --- AJUSTE AQUI: Novo formato do rodapé ---
         texto_rodape = "LEIA MAIS: jornalvozdolitoral.com"
         draw.text((IMG_WIDTH / 2, 980), texto_rodape, font=fonte_cta, fill=(255,255,255,255), anchor="ms", align="center")
         
@@ -150,12 +149,17 @@ def webhook_receiver():
 
         if not html_content: raise ValueError("Conteúdo do post não encontrado.")
         
+        # --- LÓGICA DE IMAGEM RESERVA APLICADA AQUI ---
         soup_img = BeautifulSoup(html_content, 'html.parser')
         primeira_imagem_tag = soup_img.find('img')
-        if not primeira_imagem_tag: raise ValueError("Nenhuma tag <img> encontrada.")
-        
-        url_imagem_destaque = primeira_imagem_tag.get('src')
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
+        
+        if primeira_imagem_tag:
+            url_imagem_destaque = primeira_imagem_tag.get('src')
+            print(f"🖼️ Imagem da notícia encontrada: {url_imagem_destaque}")
+        else:
+            url_imagem_destaque = url_logo
+            print(f"⚠️ Imagem da notícia não encontrada. Usando o logo como imagem principal.")
         
         if not all([titulo_noticia, url_imagem_destaque]):
             raise ValueError("Dados essenciais faltando.")
@@ -188,5 +192,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v5.4 Final. Layout de rodapé ajustado.")
+    print("✅ Automação Final. Lógica de imagem reserva ATIVA.")
     app.run(host='0.0.0.0', port=5001, debug=True)
