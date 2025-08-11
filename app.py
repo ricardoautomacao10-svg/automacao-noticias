@@ -11,8 +11,13 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 from base64 import b64encode
-from moviepy.editor import *
 import numpy as np
+
+# --- Importações Corrigidas do MoviePy ---
+from moviepy.video.VideoClip import ImageClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+import moviepy.video.fx.all as vfx
 
 # ==============================================================================
 # BLOCO 2: CONFIGURAÇÃO INICIAL
@@ -37,10 +42,9 @@ BOCA_FACEBOOK_PAGE_ID = os.getenv('BOCA_FACEBOOK_PAGE_ID')
 # BLOCO 3: FUNÇÕES AUXILIARES
 # ==============================================================================
 def gerar_manchete_com_ia(titulo, texto_noticia):
-    print("🤖 Conectando com a IA para gerar manchete...")
-    # (Usaremos o resumo do post do WP por ser mais direto e confiável)
-    resumo = BeautifulSoup(texto_noticia, 'html.parser').get_text(strip=True)[:200]
-    manchete = titulo.upper() # Usaremos o título original em maiúsculas para o vídeo
+    print("🤖 Gerando manchete e resumo...")
+    resumo = BeautifulSoup(texto_noticia, 'html.parser').get_text(strip=True)[:200] + "..."
+    manchete = titulo.upper()
     print("✅ Manchete e resumo definidos.")
     return {"manchete": manchete, "resumo": resumo}
 
@@ -57,19 +61,15 @@ def criar_video_reels(url_imagem, manchete, url_logo, url_musica):
         # Preparar a imagem base com o design
         fundo = Image.new('RGB', (1080, 1920), (0,0,0))
         
-        # Redimensiona a imagem para preencher a largura e corta na altura
         img_w, img_h = imagem_noticia.size
-        ratio = img_h / img_w
-        new_w = 1080
-        new_h = int(new_w * ratio)
+        ratio = 1920 / img_h if (1080/img_w*img_h) < 1920 else 1080 / img_w
+        new_w, new_h = int(img_w * ratio), int(img_h * ratio)
         imagem_noticia = imagem_noticia.resize((new_w, new_h))
         
-        corte_y = (new_h - 1920) // 2
-        imagem_final = imagem_noticia.crop((0, corte_y, 1080, corte_y + 1920))
+        pos_x = (1080 - new_w) // 2
+        pos_y = (1920 - new_h) // 2
+        fundo.paste(imagem_noticia, (pos_x, pos_y))
         
-        fundo.paste(imagem_final, (0,0))
-        
-        # Adiciona sobreposições (logo, texto, etc.)
         draw = ImageDraw.Draw(fundo)
         fonte_manchete = ImageFont.truetype("Anton-Regular.ttf", 110)
         
@@ -84,18 +84,21 @@ def criar_video_reels(url_imagem, manchete, url_logo, url_musica):
         clip = ImageClip(np.array(fundo)).set_duration(10)
         
         # Efeito Pan e Zoom (Ken Burns)
-        clip_zoomed = clip.resize(lambda t: 1 + 0.02 * t).set_position(('center', 'center'))
-        final_clip = CompositeVideoClip([clip_zoomed], size=(1080,1920)).set_duration(10)
+        clip_zoomed = clip.fx(vfx.resize, lambda t: 1 + 0.02 * t)
+        
+        # Garante o tamanho final correto
+        final_clip = CompositeVideoClip([clip_zoomed.set_position("center")], size=(1080,1920)).set_duration(10)
 
         # Adiciona a música
         audio_clip = AudioFileClip(url_musica).set_duration(10)
         final_video = final_clip.set_audio(audio_clip)
 
-        # Salva o vídeo em um arquivo temporário em memória
-        video_bytes = final_video.write_videofile("temp_video.mp4", codec="libx264", audio_codec="aac", temp_audiofile='temp-audio.m4a', remove_temp=True)
+        # Salva o vídeo em um arquivo
+        output_filename = "temp_video.mp4"
+        final_video.write_videofile(output_filename, codec="libx264", audio_codec="aac")
         
         # Lê os bytes do arquivo de vídeo salvo para retornar
-        with open("temp_video.mp4", "rb") as f:
+        with open(output_filename, "rb") as f:
             video_data = f.read()
 
         print(f"✅ Vídeo do Reels criado com sucesso!")
@@ -129,7 +132,6 @@ def publicar_reels(video_url, legenda, instagram_id):
         return f"Publicação pulada (credenciais faltando para ID {instagram_id})."
     
     try:
-        # Passo 1: Iniciar o upload
         url_container = f"https://graph.facebook.com/v19.0/{instagram_id}/media"
         params_container = {
             'media_type': 'REELS',
@@ -140,8 +142,7 @@ def publicar_reels(video_url, legenda, instagram_id):
         r_container = requests.post(url_container, params=params_container); r_container.raise_for_status()
         id_criacao = r_container.json()['id']
         
-        # Passo 2: Aguardar o vídeo ser processado
-        for _ in range(20): # Tenta por até 100 segundos
+        for _ in range(20):
             import time
             time.sleep(5)
             url_status = f"https://graph.facebook.com/v19.0/{id_criacao}"
@@ -149,13 +150,10 @@ def publicar_reels(video_url, legenda, instagram_id):
             r_status = requests.get(url_status, params=params_status); r_status.raise_for_status()
             status = r_status.json().get('status_code')
             print(f"Status do upload: {status}")
-            if status == 'FINISHED':
-                break
+            if status == 'FINISHED': break
         
-        if status != 'FINISHED':
-            raise Exception("Processamento do vídeo demorou demais.")
+        if status != 'FINISHED': raise Exception("Processamento do vídeo demorou demais.")
 
-        # Passo 3: Publicar o container
         url_publicacao = f"https://graph.facebook.com/v19.0/{instagram_id}/media_publish"
         params_publicacao = {'creation_id': id_criacao, 'access_token': META_API_TOKEN}
         r_publish = requests.post(url_publicacao, params=params_publicacao); r_publish.raise_for_status()
@@ -165,7 +163,6 @@ def publicar_reels(video_url, legenda, instagram_id):
     except Exception as e:
         print(f"❌ Erro ao publicar Reels no Instagram ID {instagram_id}: {e}")
         return False
-
 
 # ==============================================================================
 # BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
@@ -189,7 +186,6 @@ def webhook_receiver():
         titulo_noticia = post_data.get('title', {}).get('rendered')
         resumo_noticia = post_data.get('excerpt', {}).get('rendered')
         resumo_noticia = BeautifulSoup(resumo_noticia, 'html.parser').get_text(strip=True)
-
         url_imagem_destaque = post_data.get('_embedded', {}).get('wp:featuredmedia', [{}])[0].get('source_url')
         
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/BOCA-NO-TROMBONE-simples.png"
@@ -215,11 +211,8 @@ def webhook_receiver():
 
     legenda_final = f"{titulo_noticia}\n\n{conteudo_ia['resumo']}\n\n#noticias #litoralnorte #brasil"
     
-    # Publica no Instagram do Boca no Trombone
     sucesso_ig = publicar_reels(link_wp_video, legenda_final, BOCA_INSTAGRAM_ID)
     
-    # (A publicação de Reels no Facebook é mais complexa e usa um endpoint diferente, vamos focar no Instagram primeiro)
-
     if sucesso_ig:
         print("✅ Automação de Reels concluída com sucesso!")
         return jsonify({"status": "sucesso"}), 200
