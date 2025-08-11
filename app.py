@@ -19,7 +19,7 @@ from base64 import b64encode
 load_dotenv()
 app = Flask(__name__)
 
-# Configs do WordPress e Meta (mesmos de antes)
+# Configs do WordPress e Meta
 WP_URL = os.getenv('WP_URL')
 WP_USER = os.getenv('WP_USER')
 WP_PASSWORD = os.getenv('WP_PASSWORD')
@@ -36,36 +36,31 @@ def criar_video_reels_com_ffmpeg(url_imagem, manchete, url_logo, url_musica):
     print(f"🎬 Começando a criação do vídeo com FFmpeg...")
     try:
         # Download dos assets para arquivos temporários
-        with open("imagem_noticia.jpg", "wb") as f:
-            f.write(requests.get(url_imagem).content)
-        with open("logo.png", "wb") as f:
-            f.write(requests.get(url_logo).content)
-        with open("musica.mp3", "wb") as f:
-            f.write(requests.get(url_musica).content)
+        with open("imagem_noticia.jpg", "wb") as f: f.write(requests.get(url_imagem).content)
+        with open("logo.png", "wb") as f: f.write(requests.get(url_logo).content)
+        with open("musica.mp3", "wb") as f: f.write(requests.get(url_musica).content)
         
-        # Prepara o texto para o ffmpeg (escapando caracteres especiais)
-        manchete_escapada = manchete.replace("'", "'\\''")
+        # --- CORREÇÃO APLICADA AQUI ---
+        # "Escapa" os caracteres especiais para o comando ffmpeg
+        manchete_escapada = manchete.replace("'", "'\\''").replace(":", "\\:")
 
         # Comando FFmpeg
         comando = [
             'ffmpeg',
-            '-loop', '1', '-i', 'imagem_noticia.jpg', # Imagem principal como loop
-            '-i', 'logo.png',                        # Logo como segunda entrada
-            '-i', 'musica.mp3',                      # Música como terceira entrada
+            '-loop', '1', '-i', 'imagem_noticia.jpg',
+            '-i', 'logo.png',
+            '-i', 'musica.mp3',
             '-filter_complex',
-            # Efeito de zoom/pan, overlay do logo e overlay do texto
-            "[0:v]zoompan=z='min(zoom+0.001,1.1)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920[bg];" +
+            f"[0:v]zoompan=z='min(zoom+0.0015,1.2)':d=250:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920[bg];" +
             "[bg][1:v]overlay=70:1500[bg_logo];" +
             f"[bg_logo]drawtext=fontfile=Anton-Regular.ttf:text='{manchete_escapada}':fontcolor=white:fontsize=110:x=(w-text_w)/2:y=1750-text_h:shadowcolor=black:shadowx=5:shadowy=5",
-            '-c:v', 'libx264', '-t', '10', '-pix_fmt', 'yuv420p', # Configs de vídeo por 10s
-            '-c:a', 'aac', '-shortest', # Configs de áudio
-            'output.mp4', '-y' # Arquivo de saída, -y para sobrescrever
+            '-c:v', 'libx264', '-t', '10', '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-shortest',
+            'output.mp4', '-y'
         ]
         
-        # Executa o comando
         subprocess.run(comando, check=True, capture_output=True, text=True)
         
-        # Lê os bytes do vídeo gerado
         with open("output.mp4", "rb") as f:
             video_data = f.read()
 
@@ -103,7 +98,7 @@ def publicar_reels(video_url, legenda, instagram_id):
         return f"Publicação pulada (credenciais faltando)."
     try:
         url_container = f"https://graph.facebook.com/v19.0/{instagram_id}/media"
-        params_container = {'media_type': 'REELS', 'video_url': video_url, 'caption': legenda, 'access_token': META_API_TOKEN}
+        params_container = {'media_type': 'REELS', 'video_url': video_url, 'caption': legenda, 'access_token': META_API_TOKEN, 'share_to_feed': True}
         r_container = requests.post(url_container, params=params_container); r_container.raise_for_status()
         id_criacao = r_container.json()['id']
         
@@ -123,7 +118,7 @@ def publicar_reels(video_url, legenda, instagram_id):
         print(f"✅ Reels publicado no Instagram ID {instagram_id} com sucesso!")
         return True
     except Exception as e:
-        print(f"❌ Erro ao publicar Reels no Instagram ID {instagram_id}: {e.json()}")
+        print(f"❌ Erro ao publicar Reels no Instagram: {e.json()}")
         return False
 
 # ==============================================================================
