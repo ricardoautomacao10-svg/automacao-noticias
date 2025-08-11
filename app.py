@@ -43,6 +43,9 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         response_img = requests.get(url_imagem, stream=True); response_img.raise_for_status()
         imagem_noticia = Image.open(io.BytesIO(response_img.content)).convert("RGBA")
         
+        response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
+        logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
+        
         cor_fundo = "#051d40"
         fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
         draw = ImageDraw.Draw(fundo)
@@ -56,12 +59,8 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         pos_img_x = (IMG_WIDTH - img_w) // 2
         fundo.paste(imagem_noticia_resized, (pos_img_x, 50))
         
-        # --- Lógica Bônus: Só adiciona o logo pequeno se a imagem principal NÃO for o logo ---
-        if url_imagem != url_logo:
-            response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
-            logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
-            logo.thumbnail((180, 180))
-            fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
+        logo.thumbnail((180, 180))
+        fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
         
         linhas_texto = textwrap.wrap(titulo_post, width=35)
         texto_junto = "\n".join(linhas_texto)
@@ -130,7 +129,7 @@ def publicar_no_facebook(url_imagem, legenda):
         return False
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - VERSÃO À PROVA DE FALHAS
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
@@ -139,41 +138,47 @@ def webhook_receiver():
     dados_wp = dados_brutos[0] if isinstance(dados_brutos, list) and dados_brutos else dados_brutos
     
     try:
-        post_info = dados_wp.get('post', {})
-        titulo_noticia = post_info.get('post_title')
-        html_content = post_info.get('post_content')
-        resumo_noticia = post_info.get('post_excerpt')
-        if not resumo_noticia:
-            texto_limpo = BeautifulSoup(html_content, 'html.parser').get_text(strip=True)
-            resumo_noticia = texto_limpo[:150] + "..."
+        post_id = dados_wp.get('post_id')
+        if not post_id:
+            raise ValueError("Webhook não enviou o ID do post.")
 
-        if not html_content: raise ValueError("Conteúdo do post não encontrado.")
+        # --- NOVA LÓGICA INTELIGENTE ---
+        print(f"🔍 Buscando detalhes do post ID: {post_id} diretamente no WordPress...")
+        url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}?_embed"
+        response_post = requests.get(url_api_post, headers=HEADERS_WP)
+        response_post.raise_for_status()
+        post_data = response_post.json()
+
+        titulo_noticia = post_data.get('title', {}).get('rendered')
+        resumo_noticia = post_data.get('excerpt', {}).get('rendered')
+        # Limpa o resumo de tags HTML que possam ter vindo
+        resumo_noticia = BeautifulSoup(resumo_noticia, 'html.parser').get_text(strip=True)
+
+        # Busca a URL da Imagem de Destaque diretamente dos dados da API
+        url_imagem_destaque = post_data.get('_embedded', {}).get('wp:featuredmedia', [{}])[0].get('source_url')
         
-        # --- LÓGICA DE IMAGEM RESERVA APLICADA AQUI ---
-        soup_img = BeautifulSoup(html_content, 'html.parser')
-        primeira_imagem_tag = soup_img.find('img')
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
-        
-        if primeira_imagem_tag:
-            url_imagem_destaque = primeira_imagem_tag.get('src')
-            print(f"🖼️ Imagem da notícia encontrada: {url_imagem_destaque}")
-        else:
+
+        # Se, por algum motivo, não houver imagem de destaque, usamos o logo como Plano B.
+        if not url_imagem_destaque:
+            print(f"⚠️ Imagem de Destaque não encontrada para o post. Usando o logo como imagem principal.")
             url_imagem_destaque = url_logo
-            print(f"⚠️ Imagem da notícia não encontrada. Usando o logo como imagem principal.")
-        
-        if not all([titulo_noticia, url_imagem_destaque]):
-            raise ValueError("Dados essenciais faltando.")
+        else:
+            print(f"🖼️ Imagem de Destaque encontrada: {url_imagem_destaque}")
+
+        if not all([titulo_noticia, resumo_noticia]):
+            raise ValueError("Não foi possível extrair título ou resumo do post via API.")
             
     except Exception as e:
         print(f"❌ Erro ao processar dados do webhook: {e}")
-        return jsonify({"status": "erro", "mensagem": "Payload do webhook com formato inválido."}), 400
+        return jsonify({"status": "erro", "mensagem": "Falha ao buscar dados do post no WordPress."}), 400
 
     print(f"📰 Notícia recebida: {titulo_noticia}")
     
     imagem_gerada_bytes = criar_imagem_post(url_imagem_destaque, titulo_noticia, url_logo)
     if not imagem_gerada_bytes: return jsonify({"status": "erro", "mensagem": "Falha na criação da imagem."}), 500
     
-    nome_do_arquivo = f"post_{dados_wp.get('post_id', 'post_sem_id')}.png"
+    nome_do_arquivo = f"post_{post_id}.png"
     link_wp = upload_para_wordpress(imagem_gerada_bytes, nome_do_arquivo)
     if not link_wp: return jsonify({"status": "erro", "mensagem": "Falha no upload para o WordPress."}), 500
 
@@ -192,5 +197,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação Final. Lógica de imagem reserva ATIVA.")
+    print("✅ Automação v6.0 Final. Lógica de API Direta ATIVA.")
     app.run(host='0.0.0.0', port=5001, debug=True)
