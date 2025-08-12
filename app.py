@@ -11,12 +11,17 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 from base64 import b64encode
+from collections import deque
 
 # ==============================================================================
 # BLOCO 2: CONFIGURAÇÃO INICIAL
 # ==============================================================================
 load_dotenv()
 app = Flask(__name__)
+
+# --- MEMÓRIA ANTI-DUPLICAÇÃO ---
+# Guarda os IDs dos últimos 50 posts processados para evitar duplicatas.
+POSTS_PROCESSADOS_RECENTEMENTE = deque(maxlen=50)
 
 # Configs da Imagem
 IMG_WIDTH, IMG_HEIGHT = 1080, 1080
@@ -129,7 +134,7 @@ def publicar_no_facebook(url_imagem, legenda):
         return False
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - VERSÃO FINAL
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
@@ -138,51 +143,50 @@ def webhook_receiver():
     dados_wp = dados_brutos[0] if isinstance(dados_brutos, list) and dados_brutos else dados_brutos
     
     try:
-        post_id = dados_wp.get('post_id')
+        post_id = dados_wp.get('post', {}).get('ID')
         if not post_id:
-            raise ValueError("Webhook não enviou o ID do post.")
+            # Tenta pegar pelo post_id principal se a estrutura for diferente
+            post_id = dados_wp.get('post_id')
+            if not post_id:
+                raise ValueError("Webhook não enviou o ID do post.")
 
-        print(f"🔍 Buscando detalhes do post ID: {post_id} diretamente no WordPress...")
-        url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
-        response_post = requests.get(url_api_post, headers=HEADERS_WP)
-        response_post.raise_for_status()
-        post_data = response_post.json()
-
-        titulo_noticia = post_data.get('title', {}).get('rendered')
-        resumo_noticia = post_data.get('excerpt', {}).get('rendered')
-        resumo_noticia = BeautifulSoup(resumo_noticia, 'html.parser').get_text(strip=True)
+        # --- VERIFICAÇÃO ANTI-DUPLICATA ---
+        if post_id in POSTS_PROCESSADOS_RECENTEMENTE:
+            print(f"⚠️ Post ID {post_id} já foi processado recentemente. Ignorando aviso duplicado.")
+            return jsonify({"status": "duplicado", "mensagem": "Post já processado."}), 200
         
-        id_imagem_destaque = post_data.get('featured_media')
+        # Adiciona o ID na memória
+        POSTS_PROCESSADOS_RECENTEMENTE.append(post_id)
+        
+        post_info = dados_wp.get('post', {})
+        titulo_noticia = post_info.get('post_title')
+        html_content = post_info.get('post_content')
+        resumo_noticia = post_info.get('post_excerpt')
+        if not resumo_noticia:
+            texto_limpo = BeautifulSoup(html_content, 'html.parser').get_text(strip=True)
+            resumo_noticia = texto_limpo[:150] + "..."
+
+        if not html_content: raise ValueError("Conteúdo do post não encontrado.")
+        
+        soup_img = BeautifulSoup(html_content, 'html.parser')
+        primeira_imagem_tag = soup_img.find('img')
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
-
-        if id_imagem_destaque and id_imagem_destaque > 0:
-            print(f"🖼️ Imagem de Destaque ID {id_imagem_destaque} encontrada. Buscando URL...")
-            url_api_media = f"{WP_URL}/wp-json/wp/v2/media/{id_imagem_destaque}"
-            response_media = requests.get(url_api_media, headers=HEADERS_WP)
-            response_media.raise_for_status()
-            media_data = response_media.json()
-            
-            # --- CORREÇÃO APLICADA AQUI ---
-            # Procura pela imagem de tamanho completo ('full') primeiro.
-            url_imagem_destaque = media_data.get('media_details', {}).get('sizes', {}).get('full', {}).get('source_url')
-            
-            # Se não encontrar, usa a 'source_url' principal como um plano B.
-            if not url_imagem_destaque:
-                url_imagem_destaque = media_data.get('source_url')
-
-            print(f"✅ URL da Imagem de Destaque (Tamanho Completo): {url_imagem_destaque}")
+        
+        if primeira_imagem_tag:
+            url_imagem_destaque = primeira_imagem_tag.get('src')
+            print(f"🖼️ Imagem da notícia encontrada: {url_imagem_destaque}")
         else:
-            print(f"⚠️ Imagem de Destaque não definida para o post. Usando o logo como imagem principal.")
             url_imagem_destaque = url_logo
-
-        if not all([titulo_noticia, resumo_noticia]):
-            raise ValueError("Não foi possível extrair título ou resumo do post via API.")
+            print(f"⚠️ Imagem da notícia não encontrada. Usando o logo como imagem principal.")
+        
+        if not all([titulo_noticia, url_imagem_destaque]):
+            raise ValueError("Dados essenciais faltando.")
             
     except Exception as e:
         print(f"❌ Erro ao processar dados do webhook: {e}")
-        return jsonify({"status": "erro", "mensagem": "Falha ao buscar dados do post no WordPress."}), 400
+        return jsonify({"status": "erro", "mensagem": "Payload do webhook com formato inválido."}), 400
 
-    print(f"📰 Notícia recebida: {titulo_noticia}")
+    print(f"📰 Notícia recebida: {titulo_noticia} (ID: {post_id})")
     
     imagem_gerada_bytes = criar_imagem_post(url_imagem_destaque, titulo_noticia, url_logo)
     if not imagem_gerada_bytes: return jsonify({"status": "erro", "mensagem": "Falha na criação da imagem."}), 500
@@ -206,5 +210,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v8.0 Final. Busca de Imagem Corrigida.")
+    print("✅ Automação v9.0 Final. Lógica Anti-Duplicata ATIVA.")
     app.run(host='0.0.0.0', port=5001, debug=True)
