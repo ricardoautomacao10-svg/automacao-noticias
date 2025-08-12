@@ -129,7 +129,7 @@ def publicar_no_facebook(url_imagem, legenda):
         return False
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - VERSÃO À PROVA DE FALHAS v7.0
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - VERSÃO FINAL
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
@@ -142,7 +142,6 @@ def webhook_receiver():
         if not post_id:
             raise ValueError("Webhook não enviou o ID do post.")
 
-        # --- NOVA LÓGICA INTELIGENTE v7.0 ---
         print(f"🔍 Buscando detalhes do post ID: {post_id} diretamente no WordPress...")
         url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
         response_post = requests.get(url_api_post, headers=HEADERS_WP)
@@ -153,7 +152,6 @@ def webhook_receiver():
         resumo_noticia = post_data.get('excerpt', {}).get('rendered')
         resumo_noticia = BeautifulSoup(resumo_noticia, 'html.parser').get_text(strip=True)
         
-        # Busca o ID da imagem de destaque
         id_imagem_destaque = post_data.get('featured_media')
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
 
@@ -163,8 +161,16 @@ def webhook_receiver():
             response_media = requests.get(url_api_media, headers=HEADERS_WP)
             response_media.raise_for_status()
             media_data = response_media.json()
-            url_imagem_destaque = media_data.get('source_url')
-            print(f"✅ URL da Imagem de Destaque: {url_imagem_destaque}")
+            
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Procura pela imagem de tamanho completo ('full') primeiro.
+            url_imagem_destaque = media_data.get('media_details', {}).get('sizes', {}).get('full', {}).get('source_url')
+            
+            # Se não encontrar, usa a 'source_url' principal como um plano B.
+            if not url_imagem_destaque:
+                url_imagem_destaque = media_data.get('source_url')
+
+            print(f"✅ URL da Imagem de Destaque (Tamanho Completo): {url_imagem_destaque}")
         else:
             print(f"⚠️ Imagem de Destaque não definida para o post. Usando o logo como imagem principal.")
             url_imagem_destaque = url_logo
@@ -191,4 +197,14 @@ def webhook_receiver():
     sucesso_fb = publicar_no_facebook(link_wp, legenda_final)
 
     if sucesso_ig or sucesso_fb:
-        print("✅ Automação concluída
+        print("✅ Automação concluída com sucesso!")
+        return jsonify({"status": "sucesso"}), 200
+    else:
+        return jsonify({"status": "erro", "mensagem": "Falha ao publicar em todas as redes."}), 500
+
+# ==============================================================================
+# BLOCO 5: INICIALIZAÇÃO
+# ==============================================================================
+if __name__ == '__main__':
+    print("✅ Automação v8.0 Final. Busca de Imagem Corrigida.")
+    app.run(host='0.0.0.0', port=5001, debug=True)
