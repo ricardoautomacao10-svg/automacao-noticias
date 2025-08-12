@@ -18,6 +18,11 @@ from base64 import b64encode
 load_dotenv()
 app = Flask(__name__)
 
+# Configs da IA
+HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+API_URL_INSTRUCT = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HEADERS_HF = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
+
 # Configs da Imagem
 IMG_WIDTH, IMG_HEIGHT = 1080, 1080
 
@@ -29,7 +34,7 @@ credentials = f"{WP_USER}:{WP_PASSWORD}"
 token_wp = b64encode(credentials.encode())
 HEADERS_WP = {'Authorization': f'Basic {token_wp.decode("utf-8")}'}
 
-# Configs da API do Meta (Facebook/Instagram)
+# Configs da API do Meta
 META_API_TOKEN = os.getenv('META_API_TOKEN')
 INSTAGRAM_ID = os.getenv('INSTAGRAM_ID')
 FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID')
@@ -37,7 +42,48 @@ FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID')
 # ==============================================================================
 # BLOCO 3: FUNÇÕES AUXILIARES
 # ==============================================================================
+def gerar_conteudo_com_ia(titulo, texto_noticia):
+    print("🤖 Conectando com a IA (Mistral-7B) com prompt refinado...")
+    
+    # --- PROMPT MELHORADO PARA TEXTOS MAIS BACANAS ---
+    prompt = f"""
+    [INST] Aja como um experiente editor de mídias sociais do 'Jornal Voz do Litoral'. Sua tarefa é criar uma legenda concisa e impactante para uma postagem no Instagram e Facebook.
+
+    - **Tom de Voz:** Jornalístico, direto, mas acessível ao público geral. Evite linguagem excessivamente formal ou gírias.
+    - **Estrutura:** Comece com uma frase forte que capture a essência da notícia. Desenvolva o contexto em 2 ou 3 frases curtas. Conclua com uma chamada para ação clara, como 'Leia a notícia completa em nosso site (link na bio).'.
+
+    Gere sua resposta estritamente no formato JSON abaixo, sem nenhum texto antes ou depois:
+    {{
+     "legenda": "Seu texto aqui.",
+     "hashtags": "#hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5"
+    }}
+
+    Título Original: "{titulo}"
+    Conteúdo da Notícia: "{texto_noticia[:1500]}" [/INST]
+    """
+    
+    try:
+        payload = {"inputs": prompt, "parameters": {"max_new_tokens": 300, "return_full_text": False}}
+        response = requests.post(API_URL_INSTRUCT, headers=HEADERS_HF, json=payload)
+        response.raise_for_status()
+        
+        resultado_texto = response.json()[0]['generated_text']
+        # Limpa o resultado para extrair apenas o JSON
+        json_str = '{' + resultado_texto.split('{', 1)[-1].rsplit('}', 1)[0] + '}'
+        
+        conteudo_gerado = json.loads(json_str)
+        print("✅ Conteúdo completo (legenda e hashtags) gerado pela IA!")
+        return conteudo_gerado
+        
+    except Exception as e:
+        print(f"❌ Erro na IA da Hugging Face: {e}")
+        # Como Plano B, retorna o texto direto do post se a IA falhar
+        resumo_fallback = BeautifulSoup(texto_noticia, 'html.parser').get_text(strip=True)[:150] + "..."
+        return {"legenda": resumo_fallback, "hashtags": "#noticias #litoralnorte"}
+
+
 def criar_imagem_post(url_imagem, titulo_post, url_logo):
+    # ... (Esta função continua a mesma) ...
     print(f"🎨 Começando a criação da imagem com o design final...")
     try:
         response_img = requests.get(url_imagem, stream=True); response_img.raise_for_status()
@@ -78,6 +124,7 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         return None
 
 def upload_para_wordpress(bytes_imagem, nome_arquivo):
+    # ... (Esta função continua a mesma) ...
     print(f"⬆️ Fazendo upload de '{nome_arquivo}' para o WordPress...")
     try:
         url_wp_media = f"{WP_URL}/wp-json/wp/v2/media"
@@ -94,6 +141,7 @@ def upload_para_wordpress(bytes_imagem, nome_arquivo):
         return None
 
 def publicar_no_instagram(url_imagem, legenda):
+    # ... (Esta função continua a mesma) ...
     print("📤 Publicando no Instagram...")
     if not all([META_API_TOKEN, INSTAGRAM_ID]):
         return "Publicação no Instagram pulada (credenciais faltando)."
@@ -114,6 +162,7 @@ def publicar_no_instagram(url_imagem, legenda):
         return False
 
 def publicar_no_facebook(url_imagem, legenda):
+    # ... (Esta função continua a mesma) ...
     print("📤 Publicando no Facebook...")
     if not all([META_API_TOKEN, FACEBOOK_PAGE_ID]):
         return "Publicação no Facebook pulada (credenciais faltando)."
@@ -129,21 +178,20 @@ def publicar_no_facebook(url_imagem, legenda):
         return False
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - VERSÃO FINAL E ROBUSTA
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
+    # ... (Esta função continua a mesma) ...
     print("\n\n🔔 Webhook recebido do WordPress!")
     dados_brutos = request.json
     dados_wp = dados_brutos[0] if isinstance(dados_brutos, list) and dados_brutos else dados_brutos
     
     try:
         post_id = dados_wp.get('post_id')
-        if not post_id:
-            raise ValueError("Webhook não enviou o ID do post.")
+        if not post_id: raise ValueError("Webhook não enviou o ID do post.")
 
-        # --- LÓGICA DEFINITIVA PARA BUSCAR DADOS ---
-        print(f"🔍 Buscando detalhes do post ID: {post_id} diretamente no WordPress...")
+        print(f"🔍 Buscando detalhes do post ID: {post_id}...")
         url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
         response_post = requests.get(url_api_post, headers=HEADERS_WP)
         response_post.raise_for_status()
@@ -151,9 +199,8 @@ def webhook_receiver():
 
         titulo_noticia = post_data.get('title', {}).get('rendered')
         resumo_noticia = post_data.get('excerpt', {}).get('rendered')
-        resumo_noticia = BeautifulSoup(resumo_noticia, 'html.parser').get_text(strip=True)
+        resumo_noticia_limpo = BeautifulSoup(resumo_noticia, 'html.parser').get_text(strip=True)
         
-        # Busca o ID da imagem de destaque
         id_imagem_destaque = post_data.get('featured_media')
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
 
@@ -163,36 +210,31 @@ def webhook_receiver():
             response_media = requests.get(url_api_media, headers=HEADERS_WP)
             response_media.raise_for_status()
             media_data = response_media.json()
-            
-            # Procura pela imagem de tamanho completo ('full') primeiro.
             url_imagem_destaque = media_data.get('media_details', {}).get('sizes', {}).get('full', {}).get('source_url')
-            
-            # Se não encontrar o tamanho 'full', usa a 'source_url' principal como um plano B.
             if not url_imagem_destaque:
                 url_imagem_destaque = media_data.get('source_url')
-
-            print(f"✅ URL da Imagem de Destaque (Tamanho Completo): {url_imagem_destaque}")
+            print(f"✅ URL da Imagem de Destaque: {url_imagem_destaque}")
         else:
             print(f"⚠️ Imagem de Destaque não definida para o post. Usando o logo como imagem principal.")
             url_imagem_destaque = url_logo
-
-        if not all([titulo_noticia, resumo_noticia]):
-            raise ValueError("Não foi possível extrair título ou resumo do post via API.")
             
     except Exception as e:
         print(f"❌ Erro ao processar dados do webhook: {e}")
-        return jsonify({"status": "erro", "mensagem": "Falha ao buscar dados do post no WordPress."}), 400
+        return jsonify({"status": "erro"}), 400
 
     print(f"📰 Notícia recebida: {titulo_noticia}")
     
+    conteudo_ia = gerar_conteudo_com_ia(titulo_noticia, resumo_noticia_limpo)
+    if not conteudo_ia: return jsonify({"status": "erro"}), 500
+    
     imagem_gerada_bytes = criar_imagem_post(url_imagem_destaque, titulo_noticia, url_logo)
-    if not imagem_gerada_bytes: return jsonify({"status": "erro", "mensagem": "Falha na criação da imagem."}), 500
+    if not imagem_gerada_bytes: return jsonify({"status": "erro"}), 500
     
     nome_do_arquivo = f"post_{post_id}.png"
     link_wp = upload_para_wordpress(imagem_gerada_bytes, nome_do_arquivo)
-    if not link_wp: return jsonify({"status": "erro", "mensagem": "Falha no upload para o WordPress."}), 500
+    if not link_wp: return jsonify({"status": "erro"}), 500
 
-    legenda_final = f"{titulo_noticia}\n\n{resumo_noticia}\n\nLeia a matéria completa em nosso site. Link na bio!\n\n#noticias #litoralnorte #brasil #jornalismo"
+    legenda_final = f"{conteudo_ia['legenda']}\n\n{conteudo_ia['hashtags']}"
     
     sucesso_ig = publicar_no_instagram(link_wp, legenda_final)
     sucesso_fb = publicar_no_facebook(link_wp, legenda_final)
@@ -201,11 +243,11 @@ def webhook_receiver():
         print("✅ Automação concluída com sucesso!")
         return jsonify({"status": "sucesso"}), 200
     else:
-        return jsonify({"status": "erro", "mensagem": "Falha ao publicar em todas as redes."}), 500
+        return jsonify({"status": "erro"}), 500
 
 # ==============================================================================
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v10.0 Definitiva. Busca de Imagem Robusta ATIVA.")
+    print("✅ Automação v11.0 Final. Prompt de IA Refinado.")
     app.run(host='0.0.0.0', port=5001, debug=True)
