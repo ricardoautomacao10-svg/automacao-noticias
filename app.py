@@ -62,16 +62,19 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         fundo.paste(imagem_noticia_resized, (pos_img_x, 50))
         logo.thumbnail((180, 180)); fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
         
-        # --- AJUSTE 1: Título sempre em CAIXA ALTA ---
         linhas_texto = textwrap.wrap(titulo_post.upper(), width=35)
         texto_junto = "\n".join(linhas_texto)
         draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
-        # --- AJUSTE 2: "LEIA MAIS" em vermelho ---
-        draw.text((IMG_WIDTH / 2, 980), "LEIA MAIS:", font=fonte_cta, fill="#FF0000", anchor="me") # Cor Vermelha
-        # Posiciona o site logo após o "LEIA MAIS:"
-        draw.text((IMG_WIDTH / 2 + 5, 980), " jornalvozdolitoral.com", font=fonte_site, fill=(255,255,255,255), anchor="ms", align="left")
-        
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Usando âncoras válidas para alinhar o texto lado a lado
+        ponto_central_x = IMG_WIDTH / 2
+        ponto_y = 980
+        # "LEIA MAIS" em vermelho, alinhado pela direita ao ponto central
+        draw.text((ponto_central_x - 5, ponto_y), "LEIA MAIS:", font=fonte_cta, fill="#FF0000", anchor="mr")
+        # " jornalvozdolitoral.com" em branco, alinhado pela esquerda ao ponto central
+        draw.text((ponto_central_x + 5, ponto_y), "jornalvozdolitoral.com", font=fonte_site, fill=(255,255,255,255), anchor="ml")
+
         buffer_saida = io.BytesIO()
         fundo.save(buffer_saida, format='PNG')
         print(f"✅ Imagem com novo design criada com sucesso!")
@@ -81,7 +84,6 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         return None
 
 def upload_para_wordpress(bytes_imagem, nome_arquivo):
-    # ... (Esta função continua a mesma) ...
     print(f"⬆️ Fazendo upload de '{nome_arquivo}' para o WordPress...")
     try:
         url_wp_media = f"{WP_URL}/wp-json/wp/v2/media"
@@ -98,7 +100,6 @@ def upload_para_wordpress(bytes_imagem, nome_arquivo):
         return None
 
 def publicar_no_instagram(url_imagem, legenda):
-    # ... (Esta função continua a mesma) ...
     print("📤 Publicando no Instagram...")
     if not all([META_API_TOKEN, INSTAGRAM_ID]): return "Publicação pulada."
     try:
@@ -116,7 +117,6 @@ def publicar_no_instagram(url_imagem, legenda):
         return False
 
 def publicar_no_facebook(url_imagem, legenda):
-    # ... (Esta função continua a mesma) ...
     print("📤 Publicando no Facebook...")
     if not all([META_API_TOKEN, FACEBOOK_PAGE_ID]): return "Publicação pulada."
     try:
@@ -193,5 +193,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v15.0 Final Estável. Design Final Ajustado.")
+    print("✅ Automação v16.0 Final Estável. Correção de Design.")
     app.run(host='0.0.0.0', port=5001, debug=True)
