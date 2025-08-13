@@ -55,7 +55,7 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         
         fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 60)
         fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)
-        fonte_site = ImageFont.truetype("Anton-Regular.ttf", 28)
+        
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
         pos_img_x = (IMG_WIDTH - img_w) // 2
@@ -66,15 +66,10 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         texto_junto = "\n".join(linhas_texto)
         draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Usando âncoras válidas para alinhar o texto lado a lado
-        ponto_central_x = IMG_WIDTH / 2
-        ponto_y = 980
-        # "LEIA MAIS" em vermelho, alinhado pela direita ao ponto central
-        draw.text((ponto_central_x - 5, ponto_y), "LEIA MAIS:", font=fonte_cta, fill="#FF0000", anchor="mr")
-        # " jornalvozdolitoral.com" em branco, alinhado pela esquerda ao ponto central
-        draw.text((ponto_central_x + 5, ponto_y), "jornalvozdolitoral.com", font=fonte_site, fill=(255,255,255,255), anchor="ml")
-
+        # --- CORREÇÃO APLICADA AQUI: Simplificado para garantir funcionamento ---
+        texto_rodape = "LEIA MAIS: jornalvozdolitoral.com"
+        draw.text((IMG_WIDTH / 2, 980), texto_rodape, font=fonte_cta, fill=(255,255,255,255), anchor="ms", align="center")
+        
         buffer_saida = io.BytesIO()
         fundo.save(buffer_saida, format='PNG')
         print(f"✅ Imagem com novo design criada com sucesso!")
@@ -130,7 +125,7 @@ def publicar_no_facebook(url_imagem, legenda):
         return False
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - LÓGICA MAIS ROBUSTA
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
@@ -139,8 +134,7 @@ def webhook_receiver():
     dados_wp = dados_brutos[0] if isinstance(dados_brutos, list) and dados_brutos else dados_brutos
     
     try:
-        post_info = dados_wp.get('post', {})
-        post_id = post_info.get('ID') or dados_wp.get('post_id')
+        post_id = dados_wp.get('post', {}).get('ID') or dados_wp.get('post_id')
         if not post_id: raise ValueError("Webhook não enviou o ID do post.")
 
         if post_id in POSTS_PROCESSADOS_RECENTEMENTE:
@@ -148,22 +142,29 @@ def webhook_receiver():
             return jsonify({"status": "duplicado"}), 200
         POSTS_PROCESSADOS_RECENTEMENTE.append(post_id)
         
-        titulo_noticia = post_info.get('post_title')
-        resumo_noticia = post_info.get('post_excerpt')
-        html_content = post_info.get('post_content')
-        
-        if not resumo_noticia and html_content:
-            texto_limpo = BeautifulSoup(html_content, 'html.parser').get_text(strip=True)
-            resumo_noticia = texto_limpo[:250] + "..."
+        print(f"🔍 Buscando detalhes do post ID: {post_id} via API...")
+        url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
+        response_post = requests.get(url_api_post, headers=HEADERS_WP); response_post.raise_for_status()
+        post_data = response_post.json()
 
-        soup_img = BeautifulSoup(html_content, 'html.parser').find('img')
-        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
+        titulo_noticia = BeautifulSoup(post_data.get('title', {}).get('rendered'), 'html.parser').get_text()
+        resumo_noticia = BeautifulSoup(post_data.get('excerpt', {}).get('rendered'), 'html.parser').get_text(strip=True)
         
-        if soup_img:
-            url_imagem_destaque = soup_img.get('src')
+        id_imagem_destaque = post_data.get('featured_media')
+        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
+
+        if id_imagem_destaque and id_imagem_destaque > 0:
+            print(f"🖼️ Imagem de Destaque ID {id_imagem_destaque} encontrada. Buscando URL...")
+            url_api_media = f"{WP_URL}/wp-json/wp/v2/media/{id_imagem_destaque}"
+            response_media = requests.get(url_api_media, headers=HEADERS_WP); response_media.raise_for_status()
+            media_data = response_media.json()
+            
+            url_imagem_destaque = media_data.get('media_details', {}).get('sizes', {}).get('full', {}).get('source_url')
+            if not url_imagem_destaque: url_imagem_destaque = media_data.get('source_url')
+            print(f"✅ URL da Imagem de Destaque (Tamanho Completo): {url_imagem_destaque}")
         else:
+            print(f"⚠️ Imagem de Destaque não definida. Usando o logo como imagem principal.")
             url_imagem_destaque = url_logo
-            print(f"⚠️ Imagem não encontrada no conteúdo. Usando o logo como imagem principal.")
             
     except Exception as e:
         print(f"❌ Erro ao processar dados do webhook: {e}")
@@ -193,5 +194,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação v16.0 Final Estável. Correção de Design.")
+    print("✅ Automação Final v17.0 (Estável).")
     app.run(host='0.0.0.0', port=5001, debug=True)
