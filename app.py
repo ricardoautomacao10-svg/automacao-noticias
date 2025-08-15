@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 from base64 import b64encode
-import redis
+from collections import deque
 
 # ==============================================================================
 # BLOCO 2: CONFIGURAÇÃO INICIAL
@@ -19,20 +19,8 @@ import redis
 load_dotenv()
 app = Flask(__name__)
 
-# --- MEMÓRIA PERMANENTE ANTI-DUPLICAÇÃO ---
-try:
-    REDIS_URL = os.getenv('REDIS_URL')
-    if not REDIS_URL: raise ValueError("URL do Redis não encontrada.")
-    memoria_de_posts = redis.from_url(REDIS_URL, decode_responses=True)
-    print("✅ Conectado à memória permanente (Redis) com sucesso!")
-except Exception as e:
-    print(f"❌ AVISO: Não foi possível conectar à memória permanente (Redis). Erro: {e}")
-    memoria_de_posts = None
-
-# Configs da IA
-HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
-API_URL_INSTRUCT = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-HEADERS_HF = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
+# --- MEMÓRIA ANTI-DUPLICAÇÃO ---
+POSTS_PROCESSADOS_RECENTEMENTE = deque(maxlen=50)
 
 # Configs da Imagem
 IMG_WIDTH, IMG_HEIGHT = 1080, 1080
@@ -45,7 +33,7 @@ credentials = f"{WP_USER}:{WP_PASSWORD}"
 token_wp = b64encode(credentials.encode())
 HEADERS_WP = {'Authorization': f'Basic {token_wp.decode("utf-8")}'}
 
-# Configs da API do Meta
+# Configs da API do Meta (Facebook/Instagram)
 META_API_TOKEN = os.getenv('META_API_TOKEN')
 INSTAGRAM_ID = os.getenv('INSTAGRAM_ID')
 FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID')
@@ -53,50 +41,6 @@ FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID')
 # ==============================================================================
 # BLOCO 3: FUNÇÕES AUXILIARES
 # ==============================================================================
-def gerar_conteudo_com_ia(titulo, texto_noticia):
-    print("🤖 Conectando com a IA para gerar legenda e hashtags...")
-    if not HUGGINGFACE_TOKEN:
-        print("⚠️ Token da Hugging Face não configurado. Usando Plano B.")
-        return None
-
-    prompt = f"""
-[INST]
-# PERSONA E CONTEXTO
-Você é um social media manager especialista em jornalismo comunitário para o Litoral Norte de São Paulo. Sua habilidade é "traduzir" artigos de portal em posts curtos, impactantes e que geram conversas no Facebook e Instagram.
-
-# DIRETRIZES OBRIGATÓRIAS
-1. Foco no Impacto Humano: Ignore detalhes burocráticos e foque em como a notícia afeta a vida das pessoas.
-2. Linguagem de Rede Social: Use uma linguagem informal, direta e conversacional. Use quebras de linha para facilitar a leitura.
-3. Engajamento é Rei: Termine sempre com uma pergunta aberta para estimular os comentários.
-
-# TAREFA
-Com base no artigo completo fornecido, gere uma resposta ESTRITAMENTE no formato JSON abaixo, sem nenhum texto antes ou depois:
-{{
- "legenda": "[Comece com um emoji relevante e uma frase de impacto que resuma a notícia.]\\n\\n[Desenvolva a informação em 1 ou 2 parágrafos curtos.]\\n\\nTodos os detalhes estão na matéria completa em nosso portal. Link na bio!\\n\\n[Termine com uma pergunta aberta e direta para o leitor. Ex: 'E aí, o que você achou dessa mudança? Conta pra gente! 👇']",
- "hashtags": "[#CidadePrincipal] [#LitoralNorteSP] [#TemaDaNoticia1] [#TemaDaNoticia2] #[JornalVozDoLitoral]"
-}}
-
-# TEXTO COMPLETO DO ARTIGO DO PORTAL
-{texto_noticia[:2000]}
-[/INST]
-"""
-    
-    try:
-        payload = {"inputs": prompt, "parameters": {"max_new_tokens": 400, "return_full_text": False}}
-        response = requests.post(API_URL_INSTRUCT, headers=HEADERS_HF, json=payload)
-        response.raise_for_status()
-        
-        resultado_texto = response.json()[0]['generated_text']
-        json_str = '{' + resultado_texto.split('{', 1)[-1].rsplit('}', 1)[0] + '}'
-        
-        conteudo_gerado = json.loads(json_str)
-        print("✅ Conteúdo completo (legenda e hashtags) gerado pela IA!")
-        return conteudo_gerado
-        
-    except Exception as e:
-        print(f"❌ Erro na IA da Hugging Face: {e}. Usando Plano B.")
-        return None
-
 def criar_imagem_post(url_imagem, titulo_post, url_logo):
     print(f"🎨 Começando a criação da imagem com o design final...")
     try:
@@ -109,10 +53,9 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         cor_fundo = "#051d40"; fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
         draw = ImageDraw.Draw(fundo)
         
-        fonte_titulo = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 60, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 800})
-        fonte_cta = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 32, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 700})
-        fonte_site = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 28, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 500})
-
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 60)
+        fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)
+        
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
         pos_img_x = (IMG_WIDTH - img_w) // 2
@@ -123,16 +66,10 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         texto_junto = "\n".join(linhas_texto)
         draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
-        texto_cta = "LEIA MAIS:"
-        texto_site = " jornalvozdolitoral.com"
-        largura_cta = draw.textlength(texto_cta, font=fonte_cta)
-        largura_site = draw.textlength(texto_site, font=fonte_site)
-        largura_total = largura_cta + largura_site
-        pos_inicial_x = (IMG_WIDTH - largura_total) / 2
-        pos_y = 980
-        draw.text((pos_inicial_x, pos_y), texto_cta, font=fonte_cta, fill="#FF0000", anchor="ls")
-        draw.text((pos_inicial_x + largura_cta, pos_y), texto_site, font=fonte_site, fill=(255,255,255,255), anchor="ls")
-
+        # Versão simplificada e corrigida do rodapé para evitar erros
+        texto_rodape = "LEIA MAIS: jornalvozdolitoral.com"
+        draw.text((IMG_WIDTH / 2, 980), texto_rodape, font=fonte_cta, fill=(255,255,255,255), anchor="ms", align="center")
+        
         buffer_saida = io.BytesIO()
         fundo.save(buffer_saida, format='PNG')
         print(f"✅ Imagem com novo design criada com sucesso!")
@@ -188,7 +125,7 @@ def publicar_no_facebook(url_imagem, legenda):
         return False
 
 # ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
+# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK) - LÓGICA MAIS ROBUSTA
 # ==============================================================================
 @app.route('/webhook-receiver', methods=['POST'])
 def webhook_receiver():
@@ -200,11 +137,10 @@ def webhook_receiver():
         post_id = dados_wp.get('post_id')
         if not post_id: raise ValueError("Webhook não enviou o ID do post.")
 
-        if memoria_de_posts is not None:
-            chave_redis = f"post:{post_id}"
-            if not memoria_de_posts.set(chave_redis, "processado", ex=86400, nx=True):
-                print(f"⚠️ Post ID {post_id} já foi processado. Ignorando duplicata.")
-                return jsonify({"status": "duplicado"}), 200
+        if post_id in POSTS_PROCESSADOS_RECENTEMENTE:
+            print(f"⚠️ Post ID {post_id} já foi processado. Ignorando duplicata.")
+            return jsonify({"status": "duplicado"}), 200
+        POSTS_PROCESSADOS_RECENTEMENTE.append(post_id)
         
         print(f"🔍 Buscando detalhes do post ID: {post_id} via API...")
         url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
@@ -213,7 +149,6 @@ def webhook_receiver():
 
         titulo_noticia = BeautifulSoup(post_data.get('title', {}).get('rendered'), 'html.parser').get_text()
         resumo_noticia = BeautifulSoup(post_data.get('excerpt', {}).get('rendered'), 'html.parser').get_text(strip=True)
-        texto_completo = BeautifulSoup(post_data.get('content', {}).get('rendered'), 'html.parser').get_text(strip=True)
         
         id_imagem_destaque = post_data.get('featured_media')
         url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
@@ -237,24 +172,14 @@ def webhook_receiver():
 
     print(f"📰 Notícia recebida: {titulo_noticia}")
     
-    # Tenta usar a IA (Plano A)
-    conteudo_ia = gerar_conteudo_com_ia(titulo_noticia, texto_completo)
-    
-    # Monta a legenda final
-    if conteudo_ia and 'legenda' in conteudo_ia and 'hashtags' in conteudo_ia:
-        # Plano A: Usa o texto da IA
-        legenda_final = f"{conteudo_ia['legenda']}\n\n{conteudo_ia['hashtags']}"
-    else:
-        # Plano B: Usa o texto padrão do WordPress
-        print("🔧 Montando legenda com o Plano B (texto do WordPress).")
-        legenda_final = f"{titulo_noticia}\n\n{resumo_noticia}\n\nLeia a matéria completa em nosso site. Link na bio!\n\n#noticias #litoralnorte #brasil #jornalismo"
-
     imagem_gerada_bytes = criar_imagem_post(url_imagem_destaque, titulo_noticia, url_logo)
     if not imagem_gerada_bytes: return jsonify({"status": "erro"}), 500
     
     nome_do_arquivo = f"post_{post_id}.png"
     link_wp = upload_para_wordpress(imagem_gerada_bytes, nome_do_arquivo)
     if not link_wp: return jsonify({"status": "erro"}), 500
+
+    legenda_final = f"{titulo_noticia}\n\n{resumo_noticia}\n\nLeia a matéria completa em nosso site. Link na bio!\n\n#noticias #litoralnorte #brasil #jornalismo"
     
     sucesso_ig = publicar_no_instagram(link_wp, legenda_final)
     sucesso_fb = publicar_no_facebook(link_wp, legenda_final)
@@ -269,14 +194,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação Final Estável (v19 - IA com Fallback).")
+    print("✅ Automação Final Estável (Busca de Imagem Robusta).")
     app.run(host='0.0.0.0', port=5001, debug=True)
-```
-
-### O Que Fazer Agora
-
-1.  **Verifique a Chave no Render:** Vá na aba "Environment" do seu serviço no Render e garanta que a variável `HUGGINGFACE_TOKEN` existe e está com a sua chave correta (aquela com permissão de `write`).
-2.  **Substitua o código** do seu `app.py` por esta nova versão.
-3.  **Envie** o arquivo `app.py` atualizado para o **GitHub**.
-4.  **Aguarde** o deploy no Render.
-5.  **Teste** com um novo post.
