@@ -65,8 +65,8 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         cor_fundo_geral = (255, 255, 255, 255) # Fundo branco
         cor_fundo_texto = "#0d1b2a" # Azul escuro
         cor_vermelha = "#d90429"
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 70) # Fonte maior
-        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 35)
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50) # Fonte maior
+        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30)
 
         # --- Montagem da imagem ---
         print("   - Montando o layout base...")
@@ -254,3 +254,4 @@ def health_check():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
+
