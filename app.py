@@ -93,8 +93,8 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         draw.arc([(IMG_WIDTH - 200, 580), (IMG_WIDTH - 20, 660)], start=180, end=270, fill="#FFFFFF", width=15)
 
         # 5. Textos
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 80)
-        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 40)
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50)
+        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30)
 
         # Título
         linhas_texto = textwrap.wrap(titulo_post.upper(), width=22)
@@ -232,3 +232,4 @@ def webhook_receiver():
 if __name__ == '__main__':
     print("✅ Automação Final Estável (v18 - Novo Design).")
     app.run(host='0.0.0.0', port=5001, debug=True)
+
