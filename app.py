@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 from base64 import b64encode
-import redis
+# A linha 'import redis' foi removida daqui
 
 # ==============================================================================
 # BLOCO 2: CONFIGURAÇÃO INICIAL
@@ -19,16 +19,8 @@ import redis
 load_dotenv()
 app = Flask(__name__)
 
-# --- MEMÓRIA PERMANENTE ANTI-DUPLICAÇÃO ---
-try:
-    REDIS_URL = os.getenv('REDIS_URL')
-    if not REDIS_URL:
-        raise ValueError("URL do Redis não encontrada.")
-    memoria_de_posts = redis.from_url(REDIS_URL, decode_responses=True)
-    print("✅ Conectado à memória permanente (Redis) com sucesso!")
-except Exception as e:
-    print(f"❌ AVISO: Não foi possível conectar à memória permanente (Redis). Erro: {e}")
-    memoria_de_posts = None
+# --- O BLOCO DE CONEXÃO COM REDIS FOI COMPLETAMENTE REMOVIDO ---
+print("✅ Memória de posts (Redis) desativada. O script funcionará sem ela.")
 
 # Configs da Imagem
 IMG_WIDTH, IMG_HEIGHT = 1080, 1080
@@ -82,11 +74,10 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         draw.arc([(20, 580), (200, 660)], start=-90, end=0, fill=cor_vermelha, width=15)
         draw.arc([(IMG_WIDTH - 200, 580), (IMG_WIDTH - 20, 660)], start=180, end=270, fill="#FFFFFF", width=15)
 
-        # --- AJUSTES DE DESIGN APLICADOS AQUI ---
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50) # Ajustado para 50
-        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30) # Ajustado para 30
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50)
+        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30)
 
-        linhas_texto = textwrap.wrap(titulo_post.upper(), width=30) # Ajustado para a nova fonte
+        linhas_texto = textwrap.wrap(titulo_post.upper(), width=30)
         texto_junto = "\n".join(linhas_texto)
         draw.text((IMG_WIDTH / 2, 800), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="mm", align="center")
         
@@ -159,11 +150,7 @@ def webhook_receiver():
         post_id = dados_wp.get('post_id')
         if not post_id: raise ValueError("Webhook não enviou o ID do post.")
 
-        if memoria_de_posts is not None:
-            chave_redis = f"post:{post_id}"
-            if not memoria_de_posts.set(chave_redis, "processado", ex=86400, nx=True):
-                print(f"⚠️ Post ID {post_id} já foi processado. Ignorando duplicata.")
-                return jsonify({"status": "duplicado"}), 200
+        # --- A VERIFICAÇÃO DE POST DUPLICADO (COM REDIS) FOI REMOVIDA DAQUI ---
         
         print(f"🔍 Buscando detalhes do post ID: {post_id} via API...")
         url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
@@ -218,4 +205,6 @@ def webhook_receiver():
 # ==============================================================================
 if __name__ == '__main__':
     print("✅ Automação Final Estável (v20 - Design Anton 50/30).")
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # A porta foi alterada para a que o Render espera
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
