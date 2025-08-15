@@ -53,8 +53,8 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         cor_fundo = "#051d40"; fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
         draw = ImageDraw.Draw(fundo)
         
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 60)
-        fonte_cta = ImageFont.truetype("Anton-Regular.ttf", 32)
+        fonte_titulo = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 50)
+        fonte_cta = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 32)
         
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
@@ -67,7 +67,7 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
         
         # Versão simplificada e corrigida do rodapé para evitar erros
-        texto_rodape = "LEIA MAIS: jornalvozdolitoral.com"
+        texto_rodape = "LEIA MAIS: JORNALVOZDOLITORAL.COM"
         draw.text((IMG_WIDTH / 2, 980), texto_rodape, font=fonte_cta, fill=(255,255,255,255), anchor="ms", align="center")
         
         buffer_saida = io.BytesIO()
@@ -196,3 +196,4 @@ def webhook_receiver():
 if __name__ == '__main__':
     print("✅ Automação Final Estável (Busca de Imagem Robusta).")
     app.run(host='0.0.0.0', port=5001, debug=True)
+
