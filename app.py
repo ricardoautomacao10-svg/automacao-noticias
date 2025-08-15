@@ -50,63 +50,51 @@ FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID')
 # BLOCO 3: FUNÇÕES AUXILIARES
 # ==============================================================================
 def criar_imagem_post(url_imagem, titulo_post, url_logo):
-    print(f"🎨 Começando a criação da imagem com o novo design...")
+    print(f"🎨 Começando a criação da imagem com o design final...")
     try:
-        # --- Download dos assets ---
         response_img = requests.get(url_imagem, stream=True); response_img.raise_for_status()
         imagem_noticia = Image.open(io.BytesIO(response_img.content)).convert("RGBA")
         
         response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
         logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
-
-        # --- Preparação da tela e cores ---
-        cor_fundo_geral = (230, 230, 230, 255) # Um cinza claro para o fundo
-        cor_fundo_texto = "#0d1b2a" # Azul escuro do seu modelo
-        cor_vermelha = "#d90429"
         
-        imagem_final = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo_geral)
-        draw = ImageDraw.Draw(imagem_final)
+        cor_fundo = "#051d40"; fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
+        draw = ImageDraw.Draw(fundo)
+        
+        # --- AJUSTES DE DESIGN APLICADOS AQUI ---
+        # Usando a nova fonte Raleway e definindo os pesos (wght)
+        fonte_titulo = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 60, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 800}) # ExtraBold
+        fonte_cta = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 32, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 700}) # Bold
+        fonte_site = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 28, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 500}) # Medium
 
-        # --- Desenho dos elementos ---
-        # 1. Imagem da notícia no topo
-        img_w, img_h = 980, 551 # Proporção 16:9
+        img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
         pos_img_x = (IMG_WIDTH - img_w) // 2
-        imagem_final.paste(imagem_noticia_resized, (pos_img_x, 50))
-
-        # 2. Logo no meio
-        logo.thumbnail((200, 200))
-        pos_logo_x = (IMG_WIDTH - logo.width) // 2
-        pos_logo_y = 550 - (logo.height // 2) # Centralizado na transição
-        imagem_final.paste(logo, (pos_logo_x, pos_logo_y), logo)
-
-        # 3. Bloco de texto azul
-        raio_arredondado = 40
-        # Coordenadas do retângulo azul
-        box_azul_coords = [(50, 620), (IMG_WIDTH - 50, IMG_HEIGHT - 50)]
-        draw.rounded_rectangle(box_azul_coords, radius=raio_arredondado, fill=cor_fundo_texto)
-
-        # 4. Detalhes decorativos (curvas)
-        # Curva vermelha
-        draw.arc([(20, 580), (200, 660)], start=-90, end=0, fill=cor_vermelha, width=15)
-        # Curva branca
-        draw.arc([(IMG_WIDTH - 200, 580), (IMG_WIDTH - 20, 660)], start=180, end=270, fill="#FFFFFF", width=15)
-
-        # 5. Textos
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50)
-        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30)
-
-        # Título
-        linhas_texto = textwrap.wrap(titulo_post.upper(), width=22)
-        texto_junto = "\n".join(linhas_texto)
-        draw.text((IMG_WIDTH / 2, 800), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="mm", align="center")
+        fundo.paste(imagem_noticia_resized, (pos_img_x, 50))
+        logo.thumbnail((180, 180)); fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
         
-        # Arroba
-        draw.text((IMG_WIDTH / 2, 980), "@VOZDOLITORALNORTE", font=fonte_arroba, fill=(255,255,255,255), anchor="ms", align="center")
+        # Título sempre em CAIXA ALTA
+        linhas_texto = textwrap.wrap(titulo_post.upper(), width=35)
+        texto_junto = "\n".join(linhas_texto)
+        draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
+        
+        # Rodapé com "LEIA MAIS" em vermelho
+        texto_cta = "LEIA MAIS:"
+        texto_site = " jornalvozdolitoral.com"
+        
+        # Calcula o tamanho do texto para centralizar o conjunto
+        largura_cta = draw.textlength(texto_cta, font=fonte_cta)
+        largura_site = draw.textlength(texto_site, font=fonte_site)
+        largura_total = largura_cta + largura_site
+        
+        pos_inicial_x = (IMG_WIDTH - largura_total) / 2
+        pos_y = 980
+        
+        draw.text((pos_inicial_x, pos_y), texto_cta, font=fonte_cta, fill="#FF0000", anchor="ls") # Cor Vermelha
+        draw.text((pos_inicial_x + largura_cta, pos_y), texto_site, font=fonte_site, fill=(255,255,255,255), anchor="ls")
 
-        # --- Finalização ---
         buffer_saida = io.BytesIO()
-        imagem_final.save(buffer_saida, format='PNG')
+        fundo.save(buffer_saida, format='PNG')
         print(f"✅ Imagem com novo design criada com sucesso!")
         return buffer_saida.getvalue()
     except Exception as e:
@@ -230,6 +218,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação Final Estável (v18 - Novo Design).")
+    print("✅ Automação Final Estável (Design Raleway).")
     app.run(host='0.0.0.0', port=5001, debug=True)
-
