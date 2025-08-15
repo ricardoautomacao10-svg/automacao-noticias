@@ -57,44 +57,43 @@ def criar_imagem_post(url_imagem, titulo_post, url_logo):
         
         response_logo = requests.get(url_logo, stream=True); response_logo.raise_for_status()
         logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
+
+        cor_fundo_geral = (230, 230, 230, 255)
+        cor_fundo_texto = "#0d1b2a"
+        cor_vermelha = "#d90429"
         
-        cor_fundo = "#051d40"; fundo = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo)
-        draw = ImageDraw.Draw(fundo)
-        
-        # --- AJUSTES DE DESIGN APLICADOS AQUI ---
-        # Usando a nova fonte Raleway e definindo os pesos (wght)
-        fonte_titulo = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 60, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 800}) # ExtraBold
-        fonte_cta = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 32, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 700}) # Bold
-        fonte_site = ImageFont.truetype("Raleway-VariableFont_wght.ttf", 28, layout_engine=ImageFont.Layout.RAQM, features=['-kern'], variation_settings={'wght': 500}) # Medium
+        imagem_final = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo_geral)
+        draw = ImageDraw.Draw(imagem_final)
 
         img_w, img_h = 980, 551
         imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
         pos_img_x = (IMG_WIDTH - img_w) // 2
-        fundo.paste(imagem_noticia_resized, (pos_img_x, 50))
-        logo.thumbnail((180, 180)); fundo.paste(logo, (pos_img_x + 20, 50 + 20), logo)
-        
-        # Título sempre em CAIXA ALTA
-        linhas_texto = textwrap.wrap(titulo_post.upper(), width=35)
+        imagem_final.paste(imagem_noticia_resized, (pos_img_x, 50))
+
+        logo.thumbnail((200, 200))
+        pos_logo_x = (IMG_WIDTH - logo.width) // 2
+        pos_logo_y = 550 - (logo.height // 2)
+        imagem_final.paste(logo, (pos_logo_x, pos_logo_y), logo)
+
+        raio_arredondado = 40
+        box_azul_coords = [(50, 620), (IMG_WIDTH - 50, IMG_HEIGHT - 50)]
+        draw.rounded_rectangle(box_azul_coords, radius=raio_arredondado, fill=cor_fundo_texto)
+
+        draw.arc([(20, 580), (200, 660)], start=-90, end=0, fill=cor_vermelha, width=15)
+        draw.arc([(IMG_WIDTH - 200, 580), (IMG_WIDTH - 20, 660)], start=180, end=270, fill="#FFFFFF", width=15)
+
+        # --- AJUSTES DE DESIGN APLICADOS AQUI ---
+        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50) # Ajustado para 50
+        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30) # Ajustado para 30
+
+        linhas_texto = textwrap.wrap(titulo_post.upper(), width=30) # Ajustado para a nova fonte
         texto_junto = "\n".join(linhas_texto)
-        draw.text((IMG_WIDTH / 2, 700), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="ma", align="center")
+        draw.text((IMG_WIDTH / 2, 800), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="mm", align="center")
         
-        # Rodapé com "LEIA MAIS" em vermelho
-        texto_cta = "LEIA MAIS:"
-        texto_site = " jornalvozdolitoral.com"
-        
-        # Calcula o tamanho do texto para centralizar o conjunto
-        largura_cta = draw.textlength(texto_cta, font=fonte_cta)
-        largura_site = draw.textlength(texto_site, font=fonte_site)
-        largura_total = largura_cta + largura_site
-        
-        pos_inicial_x = (IMG_WIDTH - largura_total) / 2
-        pos_y = 980
-        
-        draw.text((pos_inicial_x, pos_y), texto_cta, font=fonte_cta, fill="#FF0000", anchor="ls") # Cor Vermelha
-        draw.text((pos_inicial_x + largura_cta, pos_y), texto_site, font=fonte_site, fill=(255,255,255,255), anchor="ls")
+        draw.text((IMG_WIDTH / 2, 980), "@VOZDOLITORALNORTE", font=fonte_arroba, fill=(255,255,255,255), anchor="ms", align="center")
 
         buffer_saida = io.BytesIO()
-        fundo.save(buffer_saida, format='PNG')
+        imagem_final.save(buffer_saida, format='PNG')
         print(f"✅ Imagem com novo design criada com sucesso!")
         return buffer_saida.getvalue()
     except Exception as e:
@@ -218,5 +217,5 @@ def webhook_receiver():
 # BLOCO 5: INICIALIZAÇÃO
 # ==============================================================================
 if __name__ == '__main__':
-    print("✅ Automação Final Estável (Design Raleway).")
+    print("✅ Automação Final Estável (v20 - Design Anton 50/30).")
     app.run(host='0.0.0.0', port=5001, debug=True)
