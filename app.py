@@ -207,7 +207,7 @@ def webhook_receiver():
         id_imagem_destaque = post_data.get('featured_media')
         
         # <<< ALTERE A URL DO SEU NOVO LOGO AQUI
-        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/logo_off_2025.png"
+        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/novo-logo-1.png"
 
         if id_imagem_destaque and id_imagem_destaque > 0:
             print(f"🖼️ [API WP] Imagem de Destaque ID {id_imagem_destaque} encontrada. Buscando URL...")
@@ -254,3 +254,4 @@ def health_check():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
+
