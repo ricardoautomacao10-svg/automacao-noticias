@@ -1,257 +1,344 @@
-# ==============================================================================
-# BLOCO 1: IMPORTAÇÕES
-# ==============================================================================
-import os
-import io
-import json
-import requests
-import textwrap
 from flask import Flask, request, jsonify
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFont
+import os
+import logging
+import requests
+import json
+import re
+import time
+import subprocess
 from base64 import b64encode
+import tempfile
+import shutil
 
-# ==============================================================================
-# BLOCO 2: CONFIGURAÇÃO INICIAL
-# ==============================================================================
-load_dotenv()
+# -- Importações para a Geração do Vídeo (agora usando requests e jinja2) --
+from jinja2 import Environment, FileSystemLoader
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
-print("🚀 INICIANDO APLICAÇÃO DE AUTOMAÇÃO v2.3 (Design Final + Diagnóstico de Redes)")
+# Configurar o Jinja2 para ler templates
+env = Environment(loader=FileSystemLoader('.'))
 
-# Configs da Imagem
-IMG_WIDTH, IMG_HEIGHT = 1080, 1080
+# ⚡ VARIÁVEIS DE AMBIENTE:
+INSTAGRAM_ACCESS_TOKEN = os.getenv('PAGE_TOKEN_BOCA', '') or os.getenv('USER_ACCESS_TOKEN', '')
+INSTAGRAM_ACCOUNT_ID = os.getenv('INSTAGRAM_ID', '')
+FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID', '')
+WP_URL = os.getenv('WP_URL', '')
+WP_USER = os.getenv('WP_USER', '')
+WP_PASSWORD = os.getenv('WP_PASSWORD', '')
+SCREENSHOT_API_KEY = os.getenv('SCREENSHOT_API_KEY', '')
 
-# Configs do WordPress
-WP_URL = os.getenv('WP_URL')
-WP_USER = os.getenv('WP_USER')
-WP_PASSWORD = os.getenv('WP_PASSWORD')
-if all([WP_URL, WP_USER, WP_PASSWORD]):
+# Configurar headers do WordPress
+HEADERS_WP = {}
+if WP_USER and WP_PASSWORD:
     credentials = f"{WP_USER}:{WP_PASSWORD}"
     token_wp = b64encode(credentials.encode())
     HEADERS_WP = {'Authorization': f'Basic {token_wp.decode("utf-8")}'}
-    print("✅ [CONFIG] Variáveis do WordPress carregadas.")
+    logger.info("✅ Configuração WordPress OK")
 else:
-    print("❌ [ERRO DE CONFIG] Faltando variáveis de ambiente do WordPress.")
-    HEADERS_WP = {}
+    logger.warning("⚠️ Configuração WordPress incompleta")
 
-# Configs da API do Meta (Facebook/Instagram)
-META_API_TOKEN = os.getenv('META_API_TOKEN')
-INSTAGRAM_ID = os.getenv('INSTAGRAM_ID')
-FACEBOOK_PAGE_ID = os.getenv('FACEBOOK_PAGE_ID')
-if all([META_API_TOKEN, INSTAGRAM_ID, FACEBOOK_PAGE_ID]):
-    print("✅ [CONFIG] Variáveis do Facebook/Instagram carregadas.")
-else:
-    print("⚠️ [AVISO DE CONFIG] Faltando uma ou mais variáveis do Meta.")
+def limpar_html(texto):
+    """Remove tags HTML do texto"""
+    if not texto:
+        return ""
+    texto_limpo = re.sub('<[^>]+>', '', texto)
+    texto_limpo = texto_limpo.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
+    return texto_limpo.strip()
 
-# ==============================================================================
-# BLOCO 3: FUNÇÕES AUXILIARES
-# ==============================================================================
-def criar_imagem_post(url_imagem, titulo_post, url_logo):
-    print("🎨 [ETAPA 1/4] Iniciando criação da imagem com o design final...")
+def obter_imagem_original(post_id):
+    """Obtém a imagem ORIGINAL da notícia"""
     try:
-        print("   - Baixando imagem da notícia...")
-        response_img = requests.get(url_imagem, stream=True, timeout=15); response_img.raise_for_status()
-        imagem_noticia = Image.open(io.BytesIO(response_img.content)).convert("RGBA")
+        post_url = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
+        response = requests.get(post_url, headers=HEADERS_WP, timeout=15)
         
-        print("   - Baixando imagem do logo...")
-        response_logo = requests.get(url_logo, stream=True, timeout=15); response_logo.raise_for_status()
-        logo = Image.open(io.BytesIO(response_logo.content)).convert("RGBA")
-
-        # --- Definição de cores e fontes ---
-        cor_fundo_geral = (255, 255, 255, 255)
-        cor_fundo_texto = "#0d1b2a"
-        cor_vermelha = "#d90429"
-        # --- FONTES AJUSTADAS CONFORME SOLICITADO ---
-        fonte_titulo = ImageFont.truetype("Anton-Regular.ttf", 50)
-        fonte_arroba = ImageFont.truetype("Anton-Regular.ttf", 30)
-
-        print("   - Montando o layout base...")
-        imagem_final = Image.new('RGBA', (IMG_WIDTH, IMG_HEIGHT), cor_fundo_geral)
-        draw = ImageDraw.Draw(imagem_final)
-
-        img_w, img_h = 980, 551
-        imagem_noticia_resized = imagem_noticia.resize((img_w, img_h))
-        pos_img_x = (IMG_WIDTH - img_w) // 2
-        imagem_final.paste(imagem_noticia_resized, (pos_img_x, 50))
-
-        # --- EFEITO DE DESIGN AJUSTADO ---
-        raio_arredondado = 40
-        # Desenha primeiro a camada vermelha por baixo
-        box_vermelho_coords = [(40, 610), (IMG_WIDTH - 40, IMG_HEIGHT - 40)]
-        draw.rounded_rectangle(box_vermelho_coords, radius=raio_arredondado, fill=cor_vermelha)
+        if response.status_code != 200:
+            logger.error("❌ Erro ao buscar post")
+            return None
         
-        # Desenha a caixa azul por cima, um pouco menor
-        box_azul_coords = [(50, 620), (IMG_WIDTH - 50, IMG_HEIGHT - 50)]
-        draw.rounded_rectangle(box_azul_coords, radius=raio_arredondado, fill=cor_fundo_texto)
-
-        # Coloca o logo centralizado, sobrepondo as duas camadas
-        logo.thumbnail((220, 220))
-        pos_logo_x = (IMG_WIDTH - logo.width) // 2
-        pos_logo_y = 620 - (logo.height // 2)
-        imagem_final.paste(logo, (pos_logo_x, pos_logo_y), logo)
+        post_data = response.json()
+        featured_media_id = post_data.get('featured_media')
         
-        print("   - Adicionando textos...")
-        # Ajusta o wrap para a nova fonte
-        linhas_texto = textwrap.wrap(titulo_post.upper(), width=32)
-        texto_junto = "\n".join(linhas_texto)
-        draw.text((IMG_WIDTH / 2, 800), texto_junto, font=fonte_titulo, fill=(255,255,255,255), anchor="mm", align="center")
+        if featured_media_id:
+            media_url = f"{WP_URL}/wp-json/wp/v2/media/{featured_media_id}"
+            media_response = requests.get(media_url, headers=HEADERS_WP, timeout=15)
+            
+            if media_response.status_code == 200:
+                media_data = media_response.json()
+                return media_data.get('source_url')
         
-        draw.text((IMG_WIDTH / 2, 980), "@VOZDOLITORALNORTE", font=fonte_arroba, fill=(255,255,255,255), anchor="ms", align="center")
-
-        buffer_saida = io.BytesIO()
-        imagem_final.convert('RGB').save(buffer_saida, format='JPEG', quality=95)
-        print("✅ [ETAPA 1/4] Imagem criada com sucesso!")
-        return buffer_saida.getvalue()
+        content = post_data.get('content', {}).get('rendered', '')
+        if 'wp-image-' in content:
+            image_match = re.search(r'src="([^"]+\.(jpg|jpeg|png))"', content)
+            if image_match:
+                return image_match.group(1)
+        
+        return None
         
     except Exception as e:
-        print(f"❌ [ERRO] Falha crítica na criação da imagem: {e}")
+        logger.error(f"💥 Erro ao buscar imagem original: {str(e)}")
         return None
 
-def upload_para_wordpress(bytes_imagem, nome_arquivo):
-    print(f"⬆️  [ETAPA 2/4] Fazendo upload para o WordPress...")
-    try:
-        url_wp_media = f"{WP_URL}/wp-json/wp/v2/media"
-        headers_upload = HEADERS_WP.copy()
-        headers_upload['Content-Disposition'] = f'attachment; filename={nome_arquivo}'
-        headers_upload['Content-Type'] = 'image/jpeg'
-        response = requests.post(url_wp_media, headers=headers_upload, data=bytes_imagem, timeout=30)
-        response.raise_for_status()
-        link_imagem_publica = response.json()['source_url']
-        print(f"✅ [ETAPA 2/4] Imagem salva no WordPress!")
-        return link_imagem_publica
-    except Exception as e:
-        print(f"❌ [ERRO] Falha ao fazer upload para o WordPress: {e}")
-        return None
-
-def publicar_no_instagram(url_imagem, legenda):
-    print("📤 [ETAPA 3/4] Publicando no Instagram...")
-    if not all([META_API_TOKEN, INSTAGRAM_ID]): 
-        print("   - ⚠️ Publicação pulada: Faltando variáveis de ambiente do Instagram.")
-        return False
-    try:
-        print("   - Criando contêiner de mídia...")
-        url_container = f"https://graph.facebook.com/v19.0/{INSTAGRAM_ID}/media"
-        params_container = {'image_url': url_imagem, 'caption': legenda, 'access_token': META_API_TOKEN}
-        r_container = requests.post(url_container, params=params_container, timeout=20)
-        r_container.raise_for_status()
-        id_criacao = r_container.json()['id']
-        
-        print("   - Publicando o contêiner...")
-        url_publicacao = f"https://graph.facebook.com/v19.0/{INSTAGRAM_ID}/media_publish"
-        params_publicacao = {'creation_id': id_criacao, 'access_token': META_API_TOKEN}
-        r_publish = requests.post(url_publicacao, params=params_publicacao, timeout=20)
-        r_publish.raise_for_status()
-        
-        print("✅ [ETAPA 3/4] Post publicado no Instagram com sucesso!")
-        return True
-    except requests.exceptions.HTTPError as e:
-        print(f"❌ [ERRO HTTP INSTAGRAM] Falha ao publicar.")
-        # --- DIAGNÓSTICO AVANÇADO ---
-        print(f"   - Status Code: {e.response.status_code}")
-        print(f"   - Resposta da API: {e.response.text}")
-        print(f"   - VERIFIQUE: O token (META_API_TOKEN) pode ter expirado ou não ter permissão.")
-        return False
-    except Exception as e:
-        print(f"❌ [ERRO GERAL INSTAGRAM] Falha: {e}")
-        return False
-
-def publicar_no_facebook(url_imagem, legenda):
-    print("📤 [ETAPA 4/4] Publicando no Facebook...")
-    if not all([META_API_TOKEN, FACEBOOK_PAGE_ID]): 
-        print("   - ⚠️ Publicação pulada: Faltando variáveis de ambiente do Facebook.")
-        return False
-    try:
-        url_post_foto = f"https://graph.facebook.com/v19.0/{FACEBOOK_PAGE_ID}/photos"
-        params = {'url': url_imagem, 'message': legenda, 'access_token': META_API_TOKEN}
-        r = requests.post(url_post_foto, params=params, timeout=20)
-        r.raise_for_status()
-        print("✅ [ETAPA 4/4] Post publicado no Facebook com sucesso!")
-        return True
-    except requests.exceptions.HTTPError as e:
-        print(f"❌ [ERRO HTTP FACEBOOK] Falha ao publicar.")
-        # --- DIAGNÓSTICO AVANÇADO ---
-        print(f"   - Status Code: {e.response.status_code}")
-        print(f"   - Resposta da API: {e.response.text}")
-        print(f"   - VERIFIQUE: O token (META_API_TOKEN) pode ter expirado ou não ter permissão.")
-        return False
-    except Exception as e:
-        print(f"❌ [ERRO GERAL FACEBOOK] Falha: {e}")
-        return False
-
-# ==============================================================================
-# BLOCO 4: O MAESTRO (RECEPTOR DO WEBHOOK)
-# ==============================================================================
-@app.route('/webhook-receiver', methods=['POST'])
-def webhook_receiver():
-    print("\n" + "="*50)
-    print("🔔 [WEBHOOK] Webhook recebido do WordPress!")
+def criar_reel_video(url_imagem, titulo, hashtags, categoria):
+    """
+    Cria um vídeo a partir de um template HTML, usando uma API externa de screenshot.
+    """
+    logger.info("🎬 Iniciando a criação do vídeo (método API)...")
     
+    if not SCREENSHOT_API_KEY:
+        logger.error("❌ Chave da ScreenshotAPI não encontrada.")
+        return None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            # 1. Renderizar o template HTML para uma string
+            logger.info("📸 Renderizando template HTML...")
+            template = env.get_template('template/reel_template.html')
+            html_content = template.render(
+                imagem_url=url_imagem,
+                titulo=titulo,
+                hashtags=hashtags,
+                categoria=categoria
+            )
+
+            # 2. Chamar a ScreenshotAPI para gerar a imagem
+            logger.info("📲 Chamando a API de screenshot...")
+            screenshot_path = os.path.join(tmpdir, "frame.png")
+            
+            response = requests.post('https://shot.screenshotapi.net/screenshot',
+                json={
+                    'token': SCREENSHOT_API_KEY,
+                    'html': html_content,
+                    'width': 1080,
+                    'height': 1920,
+                    'output': 'image',
+                    'file_type': 'png',
+                    'wait_for_event': 'load'
+                },
+                stream=True
+            )
+
+            if response.status_code == 200:
+                with open(screenshot_path, 'wb') as f:
+                    for chunk in response.iter_content(1024):
+                        f.write(chunk)
+                logger.info("🖼️ Imagem recebida da API com sucesso.")
+            else:
+                logger.error(f"❌ Erro na API de screenshot: {response.status_code} {response.text}")
+                return None
+
+            # 3. Gerar o vídeo com FFmpeg a partir da imagem recebida
+            logger.info("🎥 Gerando vídeo com FFmpeg...")
+            audio_path = "audio_fundo.mp3"
+            output_video_path = os.path.join(tmpdir, "video_final.mp4")
+
+            comando_ffmpeg = [
+                'ffmpeg', '-loop', '1', '-i', screenshot_path,
+                '-i', audio_path, '-c:v', 'libx264', '-t', '10',
+                '-pix_fmt', 'yuv420p', '-vf', 'scale=1080:1920,fps=30',
+                '-y', output_video_path
+            ]
+            
+            subprocess.run(comando_ffmpeg, check=True, capture_output=True, text=True)
+
+            if os.path.exists(output_video_path):
+                caminho_final = os.path.join(os.environ.get('TMPDIR', '/tmp'), f"video_{int(time.time())}.mp4")
+                shutil.copy(output_video_path, caminho_final)
+                logger.info(f"✅ Vídeo criado com sucesso: {caminho_final}")
+                return caminho_final
+            else:
+                logger.error("❌ FFmpeg não gerou o vídeo")
+                return None
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Erro ao rodar FFmpeg: {e.stderr}")
+            return None
+        except Exception as e:
+            logger.error(f"💥 Erro na criação do vídeo: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+def publicar_video_no_instagram(video_url, legenda):
+    """
+    Publica um vídeo (Reel) no Instagram a partir de uma URL pública.
+    """
     try:
-        dados_brutos = request.json
-        dados_wp = dados_brutos[0] if isinstance(dados_brutos, list) and dados_brutos else dados_brutos
-        post_id = dados_wp.get('post_id')
-        if not post_id: raise ValueError("Webhook não enviou o ID do post.")
+        if not INSTAGRAM_ACCESS_TOKEN or not INSTAGRAM_ACCOUNT_ID:
+            return {"status": "error", "message": "❌ Configuração Instagram incompleta"}
 
-        print(f"✅ [WEBHOOK] ID do post extraído: {post_id}")
+        create_url = f"https://graph.facebook.com/v18.0/{INSTAGRAM_ACCOUNT_ID}/media"
+        payload = {
+            'video_url': video_url,
+            'media_type': 'REELS',
+            'caption': legenda,
+            'access_token': INSTAGRAM_ACCESS_TOKEN
+        }
         
-        print(f"🔍 [API WP] Buscando detalhes do post ID: {post_id}...")
-        url_api_post = f"{WP_URL}/wp-json/wp/v2/posts/{post_id}"
-        response_post = requests.get(url_api_post, headers=HEADERS_WP, timeout=15)
-        response_post.raise_for_status()
-        post_data = response_post.json()
-
-        titulo_noticia = BeautifulSoup(post_data.get('title', {}).get('rendered', ''), 'html.parser').get_text()
-        resumo_noticia = BeautifulSoup(post_data.get('excerpt', {}).get('rendered', ''), 'html.parser').get_text(strip=True)
-        id_imagem_destaque = post_data.get('featured_media')
+        logger.info("📦 Criando container de vídeo no Instagram...")
+        response = requests.post(create_url, data=payload, timeout=60)
+        result = response.json()
         
-        # <<< ALTERE A URL DO SEU NOVO LOGO AQUI
-        url_logo = "http://jornalvozdolitoral.com/wp-content/uploads/2025/08/novo-logo-1.png"
+        if 'id' not in result:
+            logger.error(f"❌ Erro Instagram container: {result}")
+            return {"status": "error", "message": result}
+        
+        creation_id = result['id']
+        logger.info(f"✅ Container de vídeo criado: {creation_id}")
 
-        if id_imagem_destaque and id_imagem_destaque > 0:
-            print(f"🖼️ [API WP] Imagem de Destaque ID {id_imagem_destaque} encontrada. Buscando URL...")
-            url_api_media = f"{WP_URL}/wp-json/wp/v2/media/{id_imagem_destaque}"
-            response_media = requests.get(url_api_media, headers=HEADERS_WP, timeout=15); response_media.raise_for_status()
-            media_data = response_media.json()
-            url_imagem_destaque = media_data.get('source_url')
+        publish_url = f"https://graph.facebook.com/v18.0/{INSTAGRAM_ACCOUNT_ID}/media_publish"
+        publish_payload = {
+            'creation_id': creation_id,
+            'access_token': INSTAGRAM_ACCESS_TOKEN
+        }
+        
+        for _ in range(5):
+            logger.info("🚀 Publicando o Reel...")
+            publish_response = requests.post(publish_url, data=publish_payload, timeout=60)
+            publish_result = publish_response.json()
+            
+            if 'error' in publish_result and 'temporarily unavailable' in publish_result['error'].get('message', ''):
+                logger.warning("⏳ Vídeo ainda processando. Tentando novamente em 10 segundos...")
+                time.sleep(10)
+            elif 'id' in publish_result:
+                logger.info(f"🎉 Instagram OK! ID: {publish_result['id']}")
+                return {"status": "success", "id": publish_result['id']}
+            else:
+                logger.error(f"❌ Erro Instagram publicação: {publish_result}")
+                return {"status": "error", "message": publish_result}
+
+        logger.error("❌ Tentativas de publicação esgotadas.")
+        return {"status": "error", "message": "Tentativas de publicação esgotadas."}
+        
+    except Exception as e:
+        logger.error(f"💥 Erro Instagram: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+def publicar_reel_no_facebook(video_url, legenda):
+    """
+    Publica um vídeo (Reel) em uma Página do Facebook a partir de uma URL pública.
+    """
+    try:
+        if not INSTAGRAM_ACCESS_TOKEN or not FACEBOOK_PAGE_ID:
+            logger.error("❌ Configuração do Facebook incompleta.")
+            return {"status": "error", "message": "Configuração do Facebook incompleta"}
+
+        post_url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/videos"
+        
+        payload = {
+            'file_url': video_url,
+            'description': legenda,
+            'access_token': INSTAGRAM_ACCESS_TOKEN
+        }
+        
+        response = requests.post(post_url, data=payload, timeout=180)
+        result = response.json()
+        
+        if 'id' in result:
+            logger.info(f"🎉 Facebook OK! ID do Post: {result['id']}")
+            return {"status": "success", "id": result['id']}
         else:
-            print("⚠️ [API WP] Imagem de Destaque não definida. Usando o logo como imagem principal.")
-            url_imagem_destaque = url_logo
+            logger.error(f"❌ Erro na publicação do Facebook: {result}")
+            return {"status": "error", "message": result}
+
+    except Exception as e:
+        logger.error(f"💥 Erro inesperado ao publicar no Facebook: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.route('/webhook-boca', methods=['POST'])
+def handle_webhook():
+    """Endpoint para receber webhooks do WordPress e processar."""
+    try:
+        data = request.json
+        logger.info("🌐 Webhook recebido do WordPress")
+        
+        post_id = data.get('post_id')
+        if not post_id:
+            return jsonify({"status": "error", "message": "❌ post_id não encontrado"}), 400
+        
+        # 🖼️ Buscando a imagem original
+        imagem_url = obter_imagem_original(post_id)
+        if not imagem_url:
+            return jsonify({
+                "status": "error", 
+                "message": "Nenhuma imagem encontrada para a notícia"
+            }), 404
+
+        # 📝 Dados para publicação
+        titulo = limpar_html(data.get('post', {}).get('post_title', 'Título da notícia'))
+        resumo = limpar_html(data.get('post', {}).get('post_excerpt', 'Resumo da notícia'))
+        
+        categoria = "Notícias"
+        if 'post' in data and 'terms' in data['post'] and 'category' in data['post']['terms']:
+            terms = data['post']['terms']['category']
+            if terms:
+                categoria = terms[0]['name']
+
+        hashtags = f"#{categoria.replace(' ', '')} #litoralnorte"
+        legenda = f"{titulo}\n\n{resumo}\n\nLeia a matéria completa!\n\n{hashtags}"
+        
+        # 🎬 GERAR O VÍDEO
+        caminho_video_temporario = criar_reel_video(imagem_url, titulo, hashtags, categoria)
+
+        if caminho_video_temporario:
+            logger.info("✅ Vídeo criado com sucesso. Próximo passo: publicação.")
+            
+            # --- ATENÇÃO ---
+            # Aqui você precisa da sua lógica para fazer upload do vídeo
+            # para um serviço público (Cloudinary, S3, etc.) e obter a URL.
+            # video_url_publica = fazer_upload_para_cloudinary(caminho_video_temporario)
+            # Para o exemplo, vamos usar uma URL placeholder:
+            video_url_publica = 'URL_DO_VIDEO_PUBLICO_AQUI'
+
+            if not video_url_publica or video_url_publica == 'URL_DO_VIDEO_PUBLICO_AQUI':
+                 return jsonify({
+                    "status": "error", 
+                    "message": "❌ URL do vídeo pública não foi gerada. Verifique a função de upload."
+                }), 500
+
+            # --- Dispara as publicações ---
+            resultados = {}
+            
+            # 1. Publicar no Instagram
+            resultado_instagram = publicar_video_no_instagram(video_url_publica, legenda)
+            resultados['instagram'] = resultado_instagram
+
+            # 2. Publicar no Facebook
+            resultado_facebook = publicar_reel_no_facebook(video_url_publica, legenda)
+            resultados['facebook'] = resultado_facebook
+            
+            # Resposta final
+            return jsonify({
+                "status": "success",
+                "message": "Processo de publicação finalizado.",
+                "resultados": resultados
+            })
+            
+        else:
+            return jsonify({
+                "status": "error", 
+                "message": "❌ Falha na criação do vídeo"
+            }), 500
             
     except Exception as e:
-        print(f"❌ [ERRO CRÍTICO] Falha ao processar dados do webhook ou buscar no WordPress: {e}")
-        return jsonify({"status": "erro_processamento_wp"}), 500
+        logger.error(f"💥 Erro no webhook: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-    print("\n🚀 INICIANDO FLUXO DE PUBLICAÇÃO...")
-    
-    imagem_gerada_bytes = criar_imagem_post(url_imagem_destaque, titulo_noticia, url_logo)
-    if not imagem_gerada_bytes: return jsonify({"status": "erro_criacao_imagem"}), 500
-    
-    nome_do_arquivo = f"post_social_{post_id}.jpg"
-    link_wp = upload_para_wordpress(imagem_gerada_bytes, nome_do_arquivo)
-    if not link_wp: return jsonify({"status": "erro_upload_wordpress"}), 500
-
-    legenda_final = f"{titulo_noticia}\n\n{resumo_noticia}\n\nLeia a matéria completa em nosso site. Link na bio!\n\n#noticias #litoralnorte #brasil #jornalismo"
-    
-    sucesso_ig = publicar_no_instagram(link_wp, legenda_final)
-    sucesso_fb = publicar_no_facebook(link_wp, legenda_final)
-
-    if sucesso_ig or sucesso_fb:
-        print("🎉 [SUCESSO] Automação concluída!")
-        return jsonify({"status": "sucesso_publicacao"}), 200
-    else:
-        print("😭 [FALHA] Nenhuma publicação foi bem-sucedida.")
-        return jsonify({"status": "erro_publicacao_redes"}), 500
-
-# ==============================================================================
-# BLOCO 5: INICIALIZAÇÃO
-# ==============================================================================
 @app.route('/')
-def health_check():
-    return "Serviço de automação v2.3 está no ar.", 200
+def index():
+    """Página inicial com status"""
+    instagram_ok = bool(INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_ACCOUNT_ID)
+    return f"""
+    <h1>🔧 Status do Sistema Boca no Trombone</h1>
+    <p><b>Instagram:</b> {instagram_ok and '✅ Configurado' or '❌ Não configurado'}</p>
+    <p><b>Estratégia:</b> Recebe imagem, gera vídeo e publica como Reel</p>
+    <p><b>Endpoint:</b> <code>/webhook-boca</code></p>
+    """
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
-
+    logger.info("🚀 Sistema de automação INICIADO!")
+    app.run(host='0.0.0.0', port=port, debug=False)
